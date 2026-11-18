@@ -1,0 +1,231 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1180" width="1680" height="1180" preserveAspectRatio="xMidYMid meet" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title>An Opinionated Application Platform: Reference Architecture</title>
+
+  <style>
+    :root {
+      --bg:#ffffff; --ink:#16202b; --muted:#64748b; --line:#cbd5e1;
+      --card:#ffffff; --soft:#f1f5f9; --accent:#d7263d; --accent-soft:#fdf2f4;
+      --accent-line:#f0b8c1; --bar:#e2e8f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:#0f1620; --ink:#e8eef5; --muted:#93a3b6; --line:#33465c;
+        --card:#16202b; --soft:#1b2733; --accent:#ff6b81; --accent-soft:#24161c;
+        --accent-line:#6d3541; --bar:#2a3949;
+      }
+    }
+    .bg    { fill: var(--bg); }
+    .card  { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+    .soft  { fill: var(--soft); stroke: var(--line); stroke-width: 1.5; }
+    .panel { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+    .gate  { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.75; }
+    .chip  { fill: var(--card); stroke: var(--accent-line); stroke-width: 1.25; }
+    .pill  { fill: var(--accent-soft); stroke: var(--accent-line); stroke-width: 1.25; }
+    .bar   { fill: var(--bar); }
+    .t     { fill: var(--ink); }
+    .m     { fill: var(--muted); }
+    .a     { fill: var(--accent); }
+    .numT  { font-weight: 700; fill: var(--bg); font-size: 12px; }
+    .cap   { font-size: 11px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; }
+    .lbl   { font-size: 12px; font-style: italic; }
+    .sub   { font-size: 12.5px; }
+    .node  { font-size: 17px; font-weight: 650; }
+    .flow  { fill: none; stroke: var(--accent); stroke-width: 2; }
+    .rail  { fill: none; stroke: var(--accent-line); stroke-width: 3; }
+    .brace { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+    .rule  { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 5 6; }
+  </style>
+
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0.6 L10,5 L0,9.4 Z" fill="var(--accent)"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1680" height="1180"/>
+
+  <text class="t" x="60" y="64" font-size="32" font-weight="700" letter-spacing="-0.4">An Opinionated Application Platform</text>
+  <text class="m" x="60" y="94" font-size="15">The shape every agentic application takes: front end to agent to AI Gateway, governing models, sandboxes, and hosted skills</text>
+  <rect class="panel" x="60" y="138" width="14" height="14" rx="4"/>
+  <text class="m" x="82" y="150" font-size="11.5">you build</text>
+  <rect class="card" x="180" y="138" width="14" height="14" rx="4"/>
+  <text class="m" x="202" y="150" font-size="11.5">the platform provides</text>
+  <rect class="soft" x="370" y="138" width="14" height="14" rx="4"/>
+  <text class="m" x="392" y="150" font-size="11.5">your existing systems</text>
+
+  <!-- 1. Front End -->
+  <text class="m cap" x="60" y="242">1 · Front End</text>
+  <rect class="card" x="60" y="260" width="156" height="150" rx="14"/>
+  <text class="t" x="78" y="296" font-size="15.5" font-weight="700">App Service</text>
+  <text class="t" x="78" y="317" font-size="15.5" font-weight="700">Builder</text>
+  <text class="m" x="78" y="343" font-size="11">Web UI &amp; routes</text>
+  <text class="m" x="78" y="361" font-size="11">streaming chat</text>
+
+  <path class="flow" d="M216,335 L260,335" marker-end="url(#arw)"/>
+  <text class="m lbl" x="238" y="323" text-anchor="middle">chat</text>
+
+  <!-- 2. Agent Application & Runtime -->
+  <text class="m cap" x="266" y="222">2 · Agent</text>
+  <rect class="panel" x="266" y="240" width="210" height="196" rx="16"/>
+  <text class="a cap" x="286" y="274">You build</text>
+  <text class="t" x="286" y="304" font-size="19.5" font-weight="700">Agent app</text>
+  <text class="m" x="286" y="330" font-size="11.5">Foundry Hosted Agent /</text>
+  <text class="m" x="286" y="348" font-size="11.5">ACA Express</text>
+  <text class="m" x="286" y="376" font-size="11.5">Workflow, domain rules,</text>
+  <text class="m" x="286" y="394" font-size="11.5">and tool orchestration</text>
+
+  <path class="flow" d="M476,335 L520,335" marker-end="url(#arw)"/>
+  <text class="m lbl" x="498" y="323" text-anchor="middle">all calls</text>
+
+  <!-- 3. AI Gateway (Full-Height Single Choke Point) -->
+  <text class="m cap" x="526" y="190">3 · Gateway</text>
+  <rect class="gate" x="526" y="206" width="180" height="364" rx="14"/>
+  <text class="a" x="546" y="242" font-size="16.5" font-weight="700">AI Gateway</text>
+  <text class="m" x="546" y="263" font-size="11">Single governed</text>
+  <text class="m" x="546" y="279" font-size="11">choke point</text>
+  <rect class="chip" x="542" y="300" width="148" height="52" rx="8"/>
+  <text class="t" x="616" y="322" font-size="11.5" font-weight="650" text-anchor="middle">Model Routing</text>
+  <text class="m" x="616" y="338" font-size="10" text-anchor="middle">shields · quotas</text>
+  <rect class="chip" x="542" y="366" width="148" height="52" rx="8"/>
+  <text class="t" x="616" y="388" font-size="11.5" font-weight="650" text-anchor="middle">Sandbox Policy</text>
+  <text class="m" x="616" y="404" font-size="10" text-anchor="middle">isolated sessions</text>
+  <rect class="chip" x="542" y="432" width="148" height="52" rx="8"/>
+  <text class="t" x="616" y="454" font-size="11.5" font-weight="650" text-anchor="middle">MCP &amp; Tool Policy</text>
+  <text class="m" x="616" y="470" font-size="10" text-anchor="middle">auth · allowlists</text>
+  <text class="a" x="616" y="532" font-size="10.5" font-weight="700" text-anchor="middle">Zero direct bypass</text>
+
+  <!-- 4. Behind AI Gateway: Models, ACA Sandboxes, Hosted Skills -->
+  <text class="m cap" x="752" y="190">4 · Models, Sandboxes &amp; Skills</text>
+
+  <path class="flow" d="M706,252 L746,252" marker-end="url(#arw)"/>
+  <rect class="card" x="752" y="206" width="190" height="92" rx="12"/>
+  <text class="t" x="770" y="240" font-size="14.5" font-weight="700">Foundry Models</text>
+  <text class="m" x="770" y="262" font-size="11">Managed deployments</text>
+  <text class="m" x="770" y="280" font-size="10.5">Identity RBAC</text>
+
+  <path class="flow" d="M706,383 L746,383" marker-end="url(#arw)"/>
+  <rect class="pill" x="752" y="330" width="190" height="106" rx="13"/>
+  <text class="t" x="770" y="362" font-size="14.5" font-weight="700">ACA Sandboxes</text>
+  <text class="m" x="770" y="384" font-size="11">Isolated tool execution</text>
+  <text class="a" x="770" y="406" font-size="10.5" font-weight="700">PII · default-deny egress</text>
+
+  <path class="flow" d="M706,513 L746,513" marker-end="url(#arw)"/>
+  <rect class="card" x="752" y="456" width="190" height="114" rx="13"/>
+  <text class="t" x="770" y="488" font-size="14.5" font-weight="700">Hosted Skills</text>
+  <text class="m" x="770" y="510" font-size="11">Functions MCP tools:</text>
+  <text class="m" x="770" y="528" font-size="11">inventory, pricing,</text>
+  <text class="m" x="770" y="546" font-size="11">rates, deal docs</text>
+
+  <!-- 5. Existing Systems -->
+  <text class="m cap" x="980" y="312">5 · Systems</text>
+  <rect class="soft" x="980" y="330" width="162" height="74" rx="12"/>
+  <text class="t" x="996" y="360" font-size="14" font-weight="650">First-party data</text>
+  <text class="m" x="996" y="381" font-size="11">stores &amp; indexes</text>
+
+  <rect class="soft" x="980" y="418" width="162" height="74" rx="12"/>
+  <text class="t" x="996" y="448" font-size="14" font-weight="650">Partner APIs</text>
+  <text class="m" x="996" y="469" font-size="11">systems of record</text>
+
+  <rect class="soft" x="980" y="506" width="162" height="74" rx="12"/>
+  <text class="t" x="996" y="536" font-size="14" font-weight="650">Comms channels</text>
+  <text class="m" x="996" y="557" font-size="11">Teams, email (PII)</text>
+
+  <path class="flow" d="M942,492 C960,492 960,367 974,367" marker-end="url(#arw)"/>
+  <path class="flow" d="M942,513 C960,513 960,455 974,455" marker-end="url(#arw)"/>
+  <path class="flow" d="M942,534 L974,543" marker-end="url(#arw)"/>
+
+  <path class="brace" d="M1148,330 C1156,330 1156,340 1156,350 L1156,443 C1156,453 1164,455 1164,455 C1156,455 1156,457 1156,467 L1156,560 C1156,570 1156,580 1148,580"/>
+  <text class="a" x="1182" y="455" font-size="13" font-weight="700" text-anchor="middle" transform="rotate(90 1182 455)">Managed connectors</text>
+
+  <text class="m cap" x="60" y="690">Cross-cutting: provided to every application</text>
+  <path class="rule" d="M390,686 L1140,686"/>
+  <rect class="card" x="60" y="710" width="340" height="110" rx="14"/>
+  <text class="t" x="84" y="750" font-size="17" font-weight="700">Durable state (DTS)</text>
+  <text class="m" x="84" y="776" font-size="12">sessions, work-in-progress, and decisions:</text>
+  <text class="m" x="84" y="796" font-size="12">every workflow is resumable</text>
+  <rect class="card" x="425" y="710" width="340" height="110" rx="14"/>
+  <text class="t" x="449" y="750" font-size="17" font-weight="700">Human-in-the-loop</text>
+  <text class="m" x="449" y="776" font-size="12">review and approval routed into Teams</text>
+  <text class="m" x="449" y="796" font-size="12">and the tools people already work in</text>
+  <rect class="card" x="790" y="710" width="350" height="110" rx="14"/>
+  <text class="t" x="814" y="750" font-size="17" font-weight="700">Background work</text>
+  <text class="m" x="814" y="776" font-size="12">scheduled ingestion and stock health checks,</text>
+  <text class="m" x="814" y="796" font-size="12">outside the buyer request path</text>
+  <rect x="60" y="850" width="1080" height="70" rx="14" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="7 6"/>
+  <text class="a" x="84" y="882" font-size="17" font-weight="700">SRE Agent · Operations</text>
+  <text class="m" x="84" y="904" font-size="12.5">Observability · evals · guardrails · human-approved remediation across front end, agent, gateway, sandboxes, and skills</text>
+
+  <rect class="card" x="1200" y="140" width="420" height="780" rx="16"/>
+  <text class="t" x="1224" y="180" font-size="19" font-weight="700">What the platform decides</text>
+  <text class="m" x="1224" y="202" font-size="12.5">The opinions that make it a platform, not a toolkit</text>
+  <circle class="a" cx="1240" cy="243" r="11"/><text class="numT" x="1240" y="247" text-anchor="middle">1</text>
+  <text class="t" x="1264" y="248" font-size="14.5" font-weight="700">Governed shared access</text>
+  <text class="m" x="1264" y="269" font-size="11.5">Agent model and MCP calls flow through</text>
+  <text class="m" x="1264" y="286" font-size="11.5">AI Gateway: auth, shields, and quotas.</text>
+  <circle class="a" cx="1240" cy="327" r="11"/><text class="numT" x="1240" y="331" text-anchor="middle">2</text>
+  <text class="t" x="1264" y="332" font-size="14.5" font-weight="700">Conversation is a runtime</text>
+  <text class="m" x="1264" y="353" font-size="11.5">Front end calls the agent over Responses</text>
+  <text class="m" x="1264" y="370" font-size="11.5">protocol on Foundry or ACA Express.</text>
+  <circle class="a" cx="1240" cy="411" r="11"/><text class="numT" x="1240" y="415" text-anchor="middle">3</text>
+  <text class="t" x="1264" y="416" font-size="14.5" font-weight="700">PII computes in a sandbox</text>
+  <text class="m" x="1264" y="437" font-size="11.5">Sensitive documents and pre-qual run in</text>
+  <text class="m" x="1264" y="454" font-size="11.5">ACA Sandboxes; only verdicts return.</text>
+  <circle class="a" cx="1240" cy="495" r="11"/><text class="numT" x="1240" y="499" text-anchor="middle">4</text>
+  <text class="t" x="1264" y="500" font-size="14.5" font-weight="700">Skills are hosted contracts</text>
+  <text class="m" x="1264" y="521" font-size="11.5">Domain tools ship as independent Azure</text>
+  <text class="m" x="1264" y="538" font-size="11.5">Functions MCP skills behind the agent.</text>
+  <circle class="a" cx="1240" cy="579" r="11"/><text class="numT" x="1240" y="583" text-anchor="middle">5</text>
+  <text class="t" x="1264" y="584" font-size="14.5" font-weight="700">State is durable by default</text>
+  <text class="m" x="1264" y="605" font-size="11.5">Sessions, work, and decisions persist, so</text>
+  <text class="m" x="1264" y="622" font-size="11.5">people resume where they left off.</text>
+  <circle class="a" cx="1240" cy="663" r="11"/><text class="numT" x="1240" y="667" text-anchor="middle">6</text>
+  <text class="t" x="1264" y="668" font-size="14.5" font-weight="700">Humans approve in place</text>
+  <text class="m" x="1264" y="689" font-size="11.5">Sign-off routes to the tools people</text>
+  <text class="m" x="1264" y="706" font-size="11.5">already use, not a bespoke console.</text>
+  <circle class="a" cx="1240" cy="747" r="11"/><text class="numT" x="1240" y="751" text-anchor="middle">7</text>
+  <text class="t" x="1264" y="752" font-size="14.5" font-weight="700">Connectors own the boundary</text>
+  <text class="m" x="1264" y="773" font-size="11.5">Auth, limits, retries, and the data</text>
+  <text class="m" x="1264" y="790" font-size="11.5">boundary live there, not in your code.</text>
+  <circle class="a" cx="1240" cy="831" r="11"/><text class="numT" x="1240" y="835" text-anchor="middle">8</text>
+  <text class="t" x="1264" y="836" font-size="14.5" font-weight="700">Operations ship with it</text>
+  <text class="m" x="1264" y="857" font-size="11.5">Observability, evals, and guardrails are</text>
+  <text class="m" x="1264" y="874" font-size="11.5">on from day one, not bolted on later.</text>
+
+  <text class="m cap" x="60" y="970">Worked example: Contoso Dealership application</text>
+  <rect class="soft" x="60" y="990" width="250" height="60" rx="12"/>
+  <text class="m" x="76" y="1014" font-size="11">1 · Front end</text>
+  <text class="t" x="76" y="1036" font-size="13.5" font-weight="650">App Service Builder (driveline-web)</text>
+  <rect class="soft" x="322" y="990" width="250" height="60" rx="12"/>
+  <text class="m" x="338" y="1014" font-size="11">2 · Agent runtime</text>
+  <text class="t" x="338" y="1036" font-size="13.5" font-weight="650">deal-finder (Foundry / ACA)</text>
+  <rect class="soft" x="584" y="990" width="250" height="60" rx="12"/>
+  <text class="m" x="600" y="1014" font-size="11">3 · Governance</text>
+  <text class="t" x="600" y="1036" font-size="13.5" font-weight="650">AI Gateway</text>
+  <rect class="soft" x="846" y="990" width="250" height="60" rx="12"/>
+  <text class="m" x="862" y="1014" font-size="11">4 · Isolated sandbox</text>
+  <text class="t" x="862" y="1036" font-size="13.5" font-weight="650">ACA Sandboxes (prequal)</text>
+  <rect class="soft" x="1108" y="990" width="250" height="60" rx="12"/>
+  <text class="m" x="1124" y="1014" font-size="11">5 · Hosted skills (MCP)</text>
+  <text class="t" x="1124" y="1036" font-size="13.5" font-weight="650">4 Azure Functions skills</text>
+  <rect class="soft" x="1370" y="990" width="250" height="60" rx="12"/>
+  <text class="m" x="1386" y="1014" font-size="11">6 · Models</text>
+  <text class="t" x="1386" y="1036" font-size="13.5" font-weight="650">Foundry Models</text>
+  <rect class="soft" x="60" y="1062" width="250" height="60" rx="12"/>
+  <text class="m" x="76" y="1086" font-size="11">Durable workflows</text>
+  <text class="t" x="76" y="1108" font-size="13.5" font-weight="650">DTS (loan-approval)</text>
+  <rect class="soft" x="322" y="1062" width="250" height="60" rx="12"/>
+  <text class="m" x="338" y="1086" font-size="11">Human-in-the-loop</text>
+  <text class="t" x="338" y="1108" font-size="13.5" font-weight="650">Teams manager approval</text>
+  <rect class="soft" x="584" y="1062" width="250" height="60" rx="12"/>
+  <text class="m" x="600" y="1086" font-size="11">First-party data</text>
+  <text class="t" x="600" y="1108" font-size="13.5" font-weight="650">Inventory &amp; EPA DB</text>
+  <rect class="soft" x="846" y="1062" width="250" height="60" rx="12"/>
+  <text class="m" x="862" y="1086" font-size="11">Partner APIs</text>
+  <text class="t" x="862" y="1108" font-size="13.5" font-weight="650">Dealership · Lenders</text>
+  <rect class="soft" x="1108" y="1062" width="250" height="60" rx="12"/>
+  <text class="m" x="1124" y="1086" font-size="11">Comms channels</text>
+  <text class="t" x="1124" y="1108" font-size="13.5" font-weight="650">Email offer delivery</text>
+  <rect class="soft" x="1370" y="1062" width="250" height="60" rx="12"/>
+  <text class="m" x="1386" y="1086" font-size="11">Self-awareness</text>
+  <text class="t" x="1386" y="1108" font-size="13.5" font-weight="650">SRE Agent</text>
+</svg>

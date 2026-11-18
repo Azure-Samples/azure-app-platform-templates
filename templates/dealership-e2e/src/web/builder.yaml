@@ -1,0 +1,8 @@
+components:
+  - name: driveline-web
+    role: web
+    platform: nodejs
+    platformVersion: "22"
+    run:
+      port: 8080
+      healthCheckPath: /api/health

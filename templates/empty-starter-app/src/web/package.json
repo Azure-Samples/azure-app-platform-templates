@@ -1,0 +1,8 @@
+{
+  "name": "empty-starter-web",
+  "private": true,
+  "scripts": {
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('node_modules',{recursive:true,force:true})\"",
+    "dev": "node --watch server.mjs"
+  }
+}

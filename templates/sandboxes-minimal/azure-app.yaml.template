@@ -1,0 +1,13 @@
+name: __APP_SLUG__
+purpose: "__PURPOSE_JSON__"
+capabilities:
+  agent:
+    path: src/agent
+    # Default only; scripts and Azure App Platform apply .azure-app-platform/ports.env when saved.
+    interface: http://localhost:8088
+    links: [sandbox]
+  sandbox:
+    path: src/tools/document-validation
+    # Default local simulation; config/runtime.json selects optional ACA sessions with Sandboxes egress proxy.
+    interface: subprocess
+    links: [agent]

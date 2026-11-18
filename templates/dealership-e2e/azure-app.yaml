@@ -1,0 +1,43 @@
+name: dealership-e2e
+purpose: "End-to-end car-buying application across App Service Builder, Foundry / ACA Agent, AI Gateway, Hosted Skills, ACA Sandboxes, Durable Task Scheduler, Connectors, and Azure SRE Agent."
+components:
+  - tier: web
+    path: src/web
+    interface: http://localhost:3000
+    links: [agent]
+  - tier: agent
+    path: src/agent
+    interface: http://localhost:8088
+    links: [gateway, sandbox, workflows]
+  - tier: gateway
+    path: infra-ai-gateway
+    interface: configuration
+    links: [skills, sandbox]
+  - tier: skills
+    path: src/skills/inventory-search
+    interface: http://localhost:7071/runtime/webhooks/mcp
+    links: []
+  - tier: skills
+    path: src/skills/trade-in-value
+    interface: http://localhost:7072/runtime/webhooks/mcp
+    links: []
+  - tier: skills
+    path: src/skills/rate-sheet
+    interface: http://localhost:7073/runtime/webhooks/mcp
+    links: []
+  - tier: skills
+    path: src/skills/deal-doc
+    interface: http://localhost:7074/runtime/webhooks/mcp
+    links: []
+  - tier: sandbox
+    path: src/sandbox/prequal
+    interface: container
+    links: []
+  - tier: workflows
+    path: src/workflows/loan-approval
+    interface: durable-functions
+    links: []
+  - tier: sre
+    path: infra/modules/sre-agent.bicep
+    interface: azure-sre-agent
+    links: [web, agent, gateway, skills, workflows]

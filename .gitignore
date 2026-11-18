@@ -424,3 +424,21 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+# Python, Node, and Azure App Platform local runtime state
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.next/
+out/
+dist/
+.azure/
+.azure-app-platform/
+.dev-run/
+local.settings.json
+.env
+.env.*
+!.env.example
+!local.settings.json.example
+.DS_Store

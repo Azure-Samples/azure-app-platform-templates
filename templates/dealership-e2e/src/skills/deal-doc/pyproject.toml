@@ -1,0 +1,11 @@
+[project]
+name = "dealership-deal-doc-skill"
+version = "0.1.0"
+description = "Deal document Hosted Skill for Contoso Auto Dealership Demo"
+requires-python = "==3.13.*"
+dependencies = [
+    "azurefunctions-agents-runtime",
+]
+
+[tool.uv]
+package = false

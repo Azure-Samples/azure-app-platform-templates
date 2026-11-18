@@ -1,0 +1,11 @@
+[project]
+name = "dealership-inventory-search-skill"
+version = "0.1.0"
+description = "Inventory search Hosted Skill for Contoso Auto Dealership Demo"
+requires-python = "==3.13.*"
+dependencies = [
+    "azurefunctions-agents-runtime",
+]
+
+[tool.uv]
+package = false

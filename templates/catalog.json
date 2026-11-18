@@ -1,0 +1,667 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/Azure-Samples/azure-app-platform-templates",
+  "templatesRoot": "templates",
+  "sharedPortLoaders": {
+    "posix": "templates/shared/load-ports.sh",
+    "powershell": "templates/shared/load-ports.ps1"
+  },
+  "tokens": [
+    "__APP_NAME__",
+    "__APP_NAME_HTML_JSON__",
+    "__APP_SLUG__",
+    "__PURPOSE__",
+    "__PURPOSE_JSON__",
+    "__PURPOSE_HTML_JSON__",
+    "__USER_INTENT__",
+    "__AGENT_INSTRUCTIONS__",
+    "__EGRESS_ALLOW_DOMAIN__",
+    "__SKILL_NAME__",
+    "__BLOCK_NAME__"
+  ],
+  "templates": [
+    {
+      "id": "builtin-sandbox-gateway-minimal-v1",
+      "kind": "empty",
+      "name": "Sandboxes & AI Gateway Starter",
+      "description": "Start with 1 agent, ready for 2+ agents & skills: all model and sandboxed tool calls route behind AI Gateway, with ACA Sandboxes egress proxy isolation.",
+      "capabilityIds": [
+        "agent",
+        "sandbox",
+        "gateway"
+      ],
+      "customization": [
+        "App purpose",
+        "Agent instructions"
+      ],
+      "readyToRun": true,
+      "startup": {
+        "start": "./scripts/dev-start.sh",
+        "fullStart": "./scripts/dev-start.sh",
+        "stop": "./scripts/dev-stop.sh",
+        "startArgs": [],
+        "startPowerShellArgs": [],
+        "requiresGatewayForFullStart": false,
+        "entrypoints": [
+          {
+            "name": "agent",
+            "port": 8088
+          }
+        ],
+        "startEntrypoints": [
+          {
+            "name": "agent",
+            "port": 8088
+          }
+        ],
+        "reservedPorts": [
+          8088
+        ]
+      },
+      "requiredPaths": [
+        "README.md",
+        "azure-app.yaml",
+        "config/domain.json",
+        "config/egress-allowlist.json",
+        "config/egress-policy.yaml",
+        "config/runtime.json",
+        "config/document-policy.json",
+        "scripts/dev-start.sh",
+        "scripts/dev-stop.sh",
+        "scripts/dev-start.ps1",
+        "scripts/dev-stop.ps1",
+        "scripts/load-ports.sh",
+        "scripts/load-ports.ps1",
+        "src/agent/agent.yaml",
+        "src/agent/main.py",
+        "src/agent/pyproject.toml",
+        "src/agent/Dockerfile",
+        "src/agent/tests/test_runtime.py",
+        "src/agent/prompts/system.md",
+        "src/tools/document-validation/main.py",
+        "src/tools/document-validation/pyproject.toml",
+        "src/tools/document-validation/Dockerfile",
+        "src/tools/document-validation/contract.json",
+        "src/tools/document-validation/tests/test_main.py",
+        "src/tools/document-validation/egress-policy.md",
+        "src/policy/enforcement.py",
+        "docs/demos/loan-application/README.md",
+        "docs/demos/loan-application/HOW-IT-WORKS.md",
+        "examples/loan-application.txt",
+        "infra-ai-gateway/README.md"
+      ],
+      "constraints": {
+        "hostedSkillCount": 0,
+        "inventDomainTools": false,
+        "editableDomainConfiguration": true,
+        "wholeAppScriptsRequired": true,
+        "sandboxToolBoundary": true
+      },
+      "path": "templates/sandbox-gateway-minimal"
+    },
+    {
+      "id": "builtin-sandboxes-minimal-v1",
+      "kind": "empty",
+      "name": "Sandboxes Minimal Starter",
+      "description": "1 agent calling sandboxed tools: ACA Sandboxes and the Sandboxes egress proxy keep tool execution and outbound access safe without a gateway.",
+      "capabilityIds": [
+        "agent",
+        "sandbox"
+      ],
+      "customization": [
+        "App purpose",
+        "Agent instructions"
+      ],
+      "readyToRun": true,
+      "startup": {
+        "start": "./scripts/dev-start.sh",
+        "fullStart": "./scripts/dev-start.sh",
+        "stop": "./scripts/dev-stop.sh",
+        "startArgs": [],
+        "startPowerShellArgs": [],
+        "requiresGatewayForFullStart": false,
+        "entrypoints": [
+          {
+            "name": "agent",
+            "port": 8088
+          }
+        ],
+        "startEntrypoints": [
+          {
+            "name": "agent",
+            "port": 8088
+          }
+        ],
+        "reservedPorts": [
+          8088
+        ]
+      },
+      "requiredPaths": [
+        "README.md",
+        "azure-app.yaml",
+        "config/domain.json",
+        "config/egress-allowlist.json",
+        "config/runtime.json",
+        "config/document-policy.json",
+        "scripts/dev-start.sh",
+        "scripts/dev-stop.sh",
+        "scripts/dev-start.ps1",
+        "scripts/dev-stop.ps1",
+        "scripts/load-ports.sh",
+        "scripts/load-ports.ps1",
+        "src/agent/agent.yaml",
+        "src/agent/main.py",
+        "src/agent/pyproject.toml",
+        "src/agent/Dockerfile",
+        "src/agent/tests/test_runtime.py",
+        "src/agent/prompts/system.md",
+        "src/tools/document-validation/main.py",
+        "src/tools/document-validation/pyproject.toml",
+        "src/tools/document-validation/Dockerfile",
+        "src/tools/document-validation/contract.json",
+        "src/tools/document-validation/tests/test_main.py",
+        "src/tools/document-validation/egress-policy.md",
+        "src/policy/enforcement.py",
+        "docs/demos/loan-application/README.md",
+        "docs/demos/loan-application/HOW-IT-WORKS.md",
+        "examples/loan-application.txt"
+      ],
+      "constraints": {
+        "hostedSkillCount": 0,
+        "inventDomainTools": false,
+        "editableDomainConfiguration": true,
+        "wholeAppScriptsRequired": true,
+        "sandboxToolBoundary": true
+      },
+      "path": "templates/sandboxes-minimal",
+      "fallbackSharedPath": "templates/sandbox-gateway-minimal"
+    },
+    {
+      "id": "builtin-app-service-builder-vite-v1",
+      "kind": "empty",
+      "name": "App Service Builder - Vite Starter",
+      "description": "Web experience on App Service Builder (Vite + TypeScript), ready to expand with Hosted Skills.",
+      "capabilityIds": [
+        "web"
+      ],
+      "customization": [
+        "App purpose",
+        "Sample greeting"
+      ],
+      "readyToRun": true,
+      "startup": {
+        "start": "./scripts/dev-start.sh",
+        "fullStart": "./scripts/dev-start.sh",
+        "stop": "./scripts/dev-stop.sh",
+        "startArgs": [],
+        "startPowerShellArgs": [],
+        "requiresGatewayForFullStart": false,
+        "entrypoints": [
+          {
+            "name": "web",
+            "port": 8080
+          }
+        ],
+        "startEntrypoints": [
+          {
+            "name": "web",
+            "port": 8080
+          }
+        ],
+        "reservedPorts": [
+          8080
+        ]
+      },
+      "requiredPaths": [
+        "README.md",
+        "azure-app.yaml",
+        "builder.yaml",
+        "config/domain.json",
+        "index.html",
+        "package.json",
+        "tsconfig.json",
+        "public/health",
+        "src/main.ts",
+        "static.test.mjs",
+        "scripts/dev-start.sh",
+        "scripts/dev-stop.sh",
+        "scripts/dev-start.ps1",
+        "scripts/dev-stop.ps1",
+        "scripts/load-ports.sh",
+        "scripts/load-ports.ps1"
+      ],
+      "constraints": {
+        "hostedSkillCount": 0,
+        "inventDomainTools": false,
+        "editableDomainConfiguration": true,
+        "wholeAppScriptsRequired": true,
+        "appServiceBuilderTarget": true
+      },
+      "path": "templates/app-service-builder-vite"
+    },
+    {
+      "id": "builtin-app-service-builder-ai-gateway-v1",
+      "kind": "empty",
+      "name": "App Service Builder - Agent & AI Gateway",
+      "description": "Python FastAPI + Microsoft Agent Framework chat app on App Service Builder, connected to AI Gateway.",
+      "capabilityIds": [
+        "web",
+        "gateway"
+      ],
+      "customization": [
+        "App purpose",
+        "Agent instructions"
+      ],
+      "readyToRun": true,
+      "startup": {
+        "start": "./scripts/dev-start.sh",
+        "fullStart": "./scripts/dev-start.sh",
+        "stop": "./scripts/dev-stop.sh",
+        "startArgs": [],
+        "startPowerShellArgs": [],
+        "requiresGatewayForFullStart": false,
+        "entrypoints": [
+          {
+            "name": "web",
+            "port": 8080
+          }
+        ],
+        "startEntrypoints": [
+          {
+            "name": "web",
+            "port": 8080
+          }
+        ],
+        "reservedPorts": [
+          8080
+        ]
+      },
+      "requiredPaths": [
+        "README.md",
+        "azure-app.yaml",
+        "builder.yaml",
+        "config/domain.json",
+        "config/runtime.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "config.py",
+        "gateway.py",
+        "app.py",
+        "static/index.html",
+        "static/chat.js",
+        "static/site.css",
+        "tests/test_http.py",
+        "tests/test_model.py",
+        "scripts/dev-start.sh",
+        "scripts/dev-stop.sh",
+        "scripts/dev-start.ps1",
+        "scripts/dev-stop.ps1",
+        "scripts/load-ports.sh",
+        "scripts/load-ports.ps1",
+        "infra-ai-gateway/README.md"
+      ],
+      "constraints": {
+        "hostedSkillCount": 0,
+        "inventDomainTools": false,
+        "editableDomainConfiguration": true,
+        "wholeAppScriptsRequired": true,
+        "appServiceBuilderTarget": true
+      },
+      "path": "templates/app-service-builder-ai-gateway"
+    },
+    {
+      "id": "builtin-dealership-e2e-v1",
+      "kind": "sample",
+      "path": "templates/dealership-e2e",
+      "name": "Dealership E2E Reference Sample",
+      "description": "Start with a complete, runnable reference app for the dealer workflow.",
+      "capabilityIds": [
+        "web",
+        "agent",
+        "gateway",
+        "skills",
+        "sandbox",
+        "connectors",
+        "workflows",
+        "sre",
+        "data"
+      ],
+      "readyToRun": true,
+      "preservesDomain": true,
+      "startup": {
+        "start": "./scripts/dev-start.sh --skip-skills --skip-agent",
+        "fullStart": "./scripts/dev-start.sh",
+        "stop": "./scripts/dev-stop.sh",
+        "startArgs": [
+          "--skip-skills",
+          "--skip-agent"
+        ],
+        "startPowerShellArgs": [
+          "-SkipSkills",
+          "-SkipAgent"
+        ],
+        "requiresGatewayForFullStart": true,
+        "entrypoints": [
+          {
+            "name": "web",
+            "port": 3000
+          },
+          {
+            "name": "agent",
+            "port": 8088
+          },
+          {
+            "name": "inventory-search",
+            "port": 7071,
+            "kind": "function"
+          },
+          {
+            "name": "trade-in-value",
+            "port": 7072,
+            "kind": "function"
+          },
+          {
+            "name": "rate-sheet",
+            "port": 7073,
+            "kind": "function"
+          },
+          {
+            "name": "deal-doc",
+            "port": 7074,
+            "kind": "function"
+          },
+          {
+            "name": "azurite",
+            "port": 10000
+          },
+          {
+            "name": "azurite-queue",
+            "port": 10001
+          },
+          {
+            "name": "azurite-table",
+            "port": 10002
+          }
+        ],
+        "startEntrypoints": [
+          {
+            "name": "web",
+            "port": 3000
+          }
+        ],
+        "reservedPorts": [
+          3000,
+          8088,
+          7071,
+          7072,
+          7073,
+          7074,
+          10000,
+          10001,
+          10002
+        ]
+      },
+      "requiredPaths": [
+        "README.md",
+        "TESTING.md",
+        "azure.yaml",
+        "azure-app.yaml",
+        "scripts/dev-start.sh",
+        "scripts/dev-stop.sh",
+        "scripts/dev-start.ps1",
+        "scripts/dev-stop.ps1",
+        "scripts/load-ports.sh",
+        "scripts/load-ports.ps1",
+        "src/agent/agent.yaml",
+        "src/agent/main.py",
+        "src/agent/local_ports.py",
+        "src/web/package.json",
+        "src/web/builder.yaml",
+        "src/skills/inventory-search/local.settings.json.example",
+        "src/skills/trade-in-value/local.settings.json.example",
+        "src/skills/rate-sheet/local.settings.json.example",
+        "src/skills/deal-doc/local.settings.json.example",
+        "src/sandbox/prequal/Dockerfile",
+        "src/workflows/loan-approval/function_app.py"
+      ]
+    },
+    {
+      "id": "builtin-empty-starter-v1",
+      "kind": "empty",
+      "name": "Empty Starter App",
+      "description": "Start with an empty workspace shell and add your own building blocks in Build.",
+      "capabilityIds": [
+        "web",
+        "agent",
+        "gateway",
+        "skills"
+      ],
+      "customization": [
+        "App purpose",
+        "Agent instructions",
+        "Hosted Skill name"
+      ],
+      "readyToRun": true,
+      "startup": {
+        "start": "./scripts/dev-start.sh --skip-skill",
+        "fullStart": "./scripts/dev-start.sh",
+        "stop": "./scripts/dev-stop.sh",
+        "startArgs": [
+          "--skip-skill"
+        ],
+        "startPowerShellArgs": [
+          "-SkipSkill"
+        ],
+        "requiresGatewayForFullStart": false,
+        "entrypoints": [
+          {
+            "name": "web",
+            "port": 3000
+          },
+          {
+            "name": "agent",
+            "port": 8088
+          },
+          {
+            "name": "skill",
+            "port": 7071,
+            "kind": "function"
+          }
+        ],
+        "startEntrypoints": [
+          {
+            "name": "web",
+            "port": 3000
+          },
+          {
+            "name": "agent",
+            "port": 8088
+          }
+        ],
+        "reservedPorts": [
+          3000,
+          8088,
+          7071
+        ]
+      },
+      "requiredPaths": [
+        "README.md",
+        "azure-app.yaml",
+        "config/domain.json",
+        "scripts/dev-start.sh",
+        "scripts/dev-stop.sh",
+        "scripts/dev-start.ps1",
+        "scripts/dev-stop.ps1",
+        "src/web",
+        "src/agent/agent.yaml",
+        "src/agent/pyproject.toml",
+        "src/agent/prompts/system.md",
+        "src/skills/<hosted-skill>",
+        "src/skills/<hosted-skill>/tests/test_contract.py"
+      ],
+      "constraints": {
+        "hostedSkillCount": 1,
+        "inventDomainTools": false,
+        "editableDomainConfiguration": true,
+        "wholeAppScriptsRequired": true
+      },
+      "path": "templates/empty-starter-app"
+    }
+  ],
+  "buildBlocks": [
+    {
+      "id": "hosted-skill",
+      "name": "Hosted skill",
+      "tierId": "skills",
+      "projectPath": "src/skills/{name}",
+      "description": "An HTTP-triggered Azure Function starter. Define its bounded operation before connecting it to your agent.",
+      "entry": "function_app.py",
+      "sourcePath": "templates/empty-starter-app/src/skills/__SKILL__",
+      "baseSourcePath": null,
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "agent-instructions",
+      "name": "Agent",
+      "tierId": "agent",
+      "projectPath": "src/agents/{name}",
+      "description": "Instructions, agent manifest, and an explicit runtime configuration seam. Choose and connect a runtime separately.",
+      "entry": "prompts/system.md",
+      "sourcePath": "templates/build-blocks/agent-instructions",
+      "baseSourcePath": null,
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "user-experience",
+      "name": "User Experience - Web / App Service Builder",
+      "tierId": "web",
+      "projectPath": "src/web/{name}",
+      "description": "A static web page with App Service Builder configuration. Connect application endpoints separately.",
+      "entry": "index.html",
+      "sourcePath": "templates/build-blocks/web",
+      "baseSourcePath": null,
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "http-trigger",
+      "name": "Trigger - HTTP",
+      "tierId": "skills",
+      "projectPath": "src/triggers/{name}",
+      "description": "Azure Functions HTTP trigger. Implement its handler and configure authentication, storage, and event sources separately.",
+      "entry": "function_app.py",
+      "sourcePath": "templates/build-blocks/http-trigger",
+      "baseSourcePath": "templates/build-blocks/functions-base",
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "timer-trigger",
+      "name": "Trigger - Timer",
+      "tierId": "skills",
+      "projectPath": "src/triggers/{name}",
+      "description": "Azure Functions Timer trigger. Implement its handler and configure authentication, storage, and event sources separately.",
+      "entry": "function_app.py",
+      "sourcePath": "templates/build-blocks/timer-trigger",
+      "baseSourcePath": "templates/build-blocks/functions-base",
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "event-trigger",
+      "name": "Trigger - Event Grid",
+      "tierId": "skills",
+      "projectPath": "src/triggers/{name}",
+      "description": "Azure Functions Event Grid trigger. Implement its handler and configure authentication, storage, and event sources separately.",
+      "entry": "function_app.py",
+      "sourcePath": "templates/build-blocks/event-trigger",
+      "baseSourcePath": "templates/build-blocks/functions-base",
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "queue-trigger",
+      "name": "Trigger - Storage queue",
+      "tierId": "skills",
+      "projectPath": "src/triggers/{name}",
+      "description": "Azure Functions Storage queue trigger. Implement its handler and configure authentication, storage, and event sources separately.",
+      "entry": "function_app.py",
+      "sourcePath": "templates/build-blocks/queue-trigger",
+      "baseSourcePath": "templates/build-blocks/functions-base",
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "connector",
+      "name": "Connector - External API / SaaS / Graph",
+      "tierId": "connectors",
+      "projectPath": "src/connectors/{name}",
+      "description": "A connector contract and configuration starter, not a live connection. Define endpoints, authentication, and bounded operations.",
+      "entry": "connector.json",
+      "sourcePath": "templates/build-blocks/connector",
+      "baseSourcePath": null,
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "orchestration",
+      "name": "Orchestration - Durable workflow",
+      "tierId": "workflows",
+      "projectPath": "src/workflows/{name}",
+      "description": "An HTTP-started Durable Functions workflow with an intentionally unimplemented activity. Configure storage and implement the operation.",
+      "entry": "function_app.py",
+      "sourcePath": "templates/build-blocks/orchestration",
+      "baseSourcePath": null,
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "sandbox",
+      "name": "Sandbox - Isolated tool execution",
+      "tierId": "sandbox",
+      "projectPath": "src/sandboxes/{name}",
+      "description": "A bounded tool contract, Python entry point, container, and ACA egress policy. Implement the operation and connect an ACA Sandbox separately.",
+      "entry": "main.py",
+      "sourcePath": "templates/build-blocks/sandbox",
+      "baseSourcePath": null,
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    },
+    {
+      "id": "operations",
+      "name": "Operations - Observability / SRE Agent",
+      "tierId": "sre",
+      "projectPath": "src/operations/{name}",
+      "description": "An operations runbook and SRE configuration starter. No monitoring, permissions, remediation, or Azure agent is created.",
+      "entry": "sre-agent.yaml",
+      "sourcePath": "templates/build-blocks/operations",
+      "baseSourcePath": null,
+      "tokens": [
+        "__BLOCK_NAME__",
+        "__SKILL_NAME__"
+      ]
+    }
+  ]
+}
