@@ -2,9 +2,33 @@
 
 <img src="docs/images/agentic-architecture.svg" alt="Agentic Cloud Application: front end to agent to AI Gateway, governing models, ACA Sandboxes, Hosted Skills, and human approval workflows" width="820" />
 
-Official starter templates, end-to-end reference sample, and architecture documentation for **Azure App Platform**: an opinionated serverless and AI-native application platform built around **Azure App Service Builder**, **Microsoft Foundry Hosted Agents** / **Azure Container Apps**, **Azure AI Gateway**, **ACA Sandboxes**, **Azure Functions Hosted Skills (MCP)**, **Durable Task Scheduler (DTS)**, **Managed Connectors**, and **Azure SRE Agent**.
+Official starter templates, end-to-end reference sample, and architecture documentation for the [**Azure App Platform** Copilot Canvas](https://github.com/microsoft/azure-dev-tools/tree/main/canvases/azure-app-platform) in [**microsoft/azure-dev-tools**](https://github.com/microsoft/azure-dev-tools): an opinionated serverless and AI-native application platform built around **Azure App Service Builder**, **Microsoft Foundry Hosted Agents** / **Azure Container Apps**, **Azure AI Gateway**, **ACA Sandboxes**, **Azure Functions Hosted Skills (MCP)**, **Durable Task Scheduler (DTS)**, **Managed Connectors**, and **Azure SRE Agent**.
 
-Every template follows three core design principles:
+---
+
+## Try the Azure App Platform Canvas in GitHub Copilot
+
+The interactive [**Azure App Platform** canvas](https://github.com/microsoft/azure-dev-tools/tree/main/canvases/azure-app-platform) lets you create apps from these templates in isolated Git worktrees, connect Azure AI Gateway and ACA Sandboxes, run and test locally, inspect a live evidence-backed **App Map**, and deploy to Azure.
+
+1. **Install from the built-in `awesome-copilot` marketplace**:
+   - **In GitHub Copilot App**: Open **Customize -> Plugins**, find **Azure App Platform** in the **awesome-copilot** marketplace, and select **Install**.
+   - **Or via Copilot CLI**:
+     ```shell
+     copilot plugin install azure-app-platform@awesome-copilot
+     ```
+2. **Open the canvas** by asking in chat:
+   ```text
+   open Azure App Platform
+   ```
+3. Choose **Create a new app**, pick one of the starter templates or the complete Dealership reference sample below, and customize, run, and deploy directly from the side panel.
+
+Canvas source code, companion skills, and release documentation live in [**microsoft/azure-dev-tools/canvases/azure-app-platform**](https://github.com/microsoft/azure-dev-tools/tree/main/canvases/azure-app-platform).
+
+---
+
+## Core Design Principles
+
+Every template follows three architectural guarantees:
 
 - **Single governed choke point (`AI Gateway`)**: Front ends talk to the agent, and every outbound call from the agent to models, sandboxes, Hosted Skills, and workflow/communication tools passes through **Azure AI Gateway** for authentication, Prompt Shields, quotas, routing, and OpenTelemetry tracing.
 - **Environment safety (`ACA Sandboxes`)**: Sensitive PII computation and untrusted document/code execution run inside ephemeral microVMs with no host credentials and a default-deny egress proxy.
@@ -32,9 +56,9 @@ Every template follows three core design principles:
 
 ---
 
-## Quickstart: Run the Dealership Reference App Locally
+## Standalone Quickstart (Without Canvas)
 
-Try the buyer web experience right away in offline mock mode (no Azure resources required):
+Try the Dealership buyer web experience right away in offline mock mode (no Azure resources required):
 
 ```shell
 cd templates/dealership-e2e/src/web
