@@ -160,7 +160,8 @@
   <!-- Column D (Bottom): Remote Model -->
   <rect class="card" x="1030" y="470" width="310" height="110" rx="16"/>
   <text class="t" x="1185" y="518" font-size="17" font-weight="700" text-anchor="middle">Remote model</text>
-  <text class="m sub" x="1185" y="544" text-anchor="middle">gpt-latest · routed &amp; rate-limited</text>
+  <text class="m sub" x="1185" y="541" text-anchor="middle">gpt-latest / gpt-mini-latest</text>
+  <text class="m" x="1185" y="559" font-size="11" text-anchor="middle">gpt-6.2-sol · gpt-5-mini</text>
 
   <text class="m" x="290" y="618" font-size="12.5">AI Gateway governs inbound access from 1→2+ brains to the hands and models; the Sandboxes egress proxy governs outbound calls from the hands.</text>
 

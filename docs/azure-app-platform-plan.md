@@ -62,11 +62,11 @@ flowchart LR
   end
 
   subgraph GW["3 · Governed Choke Point"]
-    aigw["AI Gateway<br/>Auth · Routing · Prompt Shields · MCP Policy · OTel"]
+    aigw["AI Gateway<br/>Aliases: gpt-latest · gpt-mini-latest<br/>Auth · Prompt Shields · MCP Policy · OTel"]
   end
 
-  subgraph BEHIND["4 · Governed Targets Behind AI Gateway"]
-    models[("Foundry Models<br/>gpt-5.4 · gpt-5-mini")]
+  subgraph BEHIND["4 · Models & Tools"]
+    models[("Foundry Models<br/>gpt-6.2-sol · gpt-5-mini")]
     sbx["ACA Sandboxes (prequal)<br/>Default-deny egress · PII stays inside"]
     skills["Hosted Skills (Functions MCP)<br/>inventory-search · trade-in-value<br/>rate-sheet · deal-doc"]
     dts["Durable Workflows (DTS)<br/>LoanApproval & InventoryReplenishment"]
@@ -120,7 +120,7 @@ Teams can start with the smallest standalone template (`templates/sandboxes-mini
 
 ![Car-Seller Agent: end-to-end runtime and 6-step deal flow](images/car-seller-agent-infographic.svg)
 
-1. **Search & discover (`inventory-search`)**: Paul opens `driveline-web` (deployed on Azure App Service Builder via `builder.yaml`) and asks for EVs under `$40,000` with at least `250` miles of range. `driveline-web` streams over `/responses` to `deal-finder`, which calls `inventory-search` through AI Gateway to return matching vehicles backed by real EPA range specs (`fueleconomy.gov`).
+1. **Search & discover (`inventory-search`)**: Paul opens `driveline-web` (deployed on Azure App Service Builder via `builder.yaml`) and asks for EVs under `$40,000` with at least `250` miles of range. `driveline-web` streams over `/responses` to `deal-finder`. The agent addresses AI Gateway model aliases (`gpt-latest` for deep synthesis and `gpt-mini-latest` for fast filter turns, backed by `gpt-6.2-sol` and `gpt-5-mini`) and calls `inventory-search` through AI Gateway to return matching vehicles backed by real EPA range specs (`fueleconomy.gov`).
 2. **Trade-in & net quote (`trade-in-value`)**: Paul asks what his trade-in is worth; `deal-finder` invokes the `trade-in-value` Hosted Skill through AI Gateway to compute vehicle appraisal and net price.
 3. **PII-isolated pre-qualification (`ACA Sandboxes`)**: Before committing, Paul checks financing options. Borrower income and sensitive identifiers are evaluated inside an ephemeral `prequal` ACA Sandbox with default-deny egress. Raw PII never enters model prompts, application databases, or telemetry logs; only `{credit_band, approved, apr_percent, monthly_payment}` returns.
 4. **Financing comparison (`rate-sheet`)**: The `rate-sheet` Hosted Skill computes 36-, 48-, and 60-month APR and payment schedules for the returned credit tier.
@@ -151,7 +151,8 @@ Teams can start with the smallest standalone template (`templates/sandboxes-mini
 | --- | --- |
 | **Web Front End** | TypeScript, Next.js (`standalone` output) or Vite, `builder.yaml` |
 | **Agent Runtime** | Python 3.13 (`uv`), `agent-framework`, `azure-ai-agentserver-agentframework`, Responses API |
-| **AI Gateway** | Azure API Management AI Gateway (`OpenAIChatClient` / `OpenAIChatCompletionClient` + governed MCP backends) |
+| **AI Gateway** | Azure API Management AI Gateway governing model aliases (`gpt-latest`, `gpt-mini-latest`) and all sandbox/MCP tool calls |
+| **Foundry Models** | Fresh model deployments behind AI Gateway aliases (`gpt-6.2-sol` + `gpt-5-mini`) via Managed Identity RBAC |
 | **Hosted Skills** | Python v2 Azure Functions, `azurefunctions-agents-runtime`, MCP webhook endpoint (`/runtime/webhooks/mcp`) |
 | **Sandboxes** | Containerized Python tools on `Microsoft.App/sandboxGroups` with `egress-policy.yaml` (`defaultAction: Deny`) |
 | **Workflows** | Azure Durable Functions (Python v2) backed by `Microsoft.DurableTask/schedulers` |

@@ -1,6 +1,6 @@
 # Azure App Platform Templates & Reference Architecture
 
-<img src="docs/images/agentic-architecture.svg" alt="Agentic Cloud Application: front end to agent to AI Gateway, governing models, ACA Sandboxes, Hosted Skills, and human approval workflows" width="820" />
+<img src="docs/images/agentic-architecture.svg" alt="Agentic Cloud Application: front end to agent to AI Gateway, governing models and tools (ACA Sandboxes, Hosted Skills, and workflows)" width="820" />
 
 Official starter templates, end-to-end reference sample, and architecture documentation for the [**Azure App Platform** Copilot Canvas](https://github.com/microsoft/azure-dev-tools/tree/main/canvases/azure-app-platform) in [**microsoft/azure-dev-tools**](https://github.com/microsoft/azure-dev-tools): an opinionated serverless and AI-native application platform built around **Azure App Service Builder**, **Microsoft Foundry Hosted Agents** / **Azure Container Apps**, **Azure AI Gateway**, **ACA Sandboxes**, **Azure Functions Hosted Skills (MCP)**, **Durable Task Scheduler (DTS)**, **Managed Connectors**, and **Azure SRE Agent**.
 
@@ -30,7 +30,7 @@ Canvas source code, companion skills, and release documentation live in [**micro
 
 Every template follows three architectural guarantees:
 
-- **Single governed choke point (`AI Gateway`)**: Front ends talk to the agent, and every outbound call from the agent to models, sandboxes, Hosted Skills, and workflow/communication tools passes through **Azure AI Gateway** for authentication, Prompt Shields, quotas, routing, and OpenTelemetry tracing.
+- **Single governed choke point (`AI Gateway`)**: Front ends talk to the agent, and every outbound call from the agent to models (`gpt-latest` and `gpt-mini-latest` aliases backed by `gpt-6.2-sol` and `gpt-5-mini`) and tools (ACA Sandboxes, Hosted Skills, and workflows) passes through **Azure AI Gateway** for authentication, Prompt Shields, quotas, routing, and OpenTelemetry tracing.
 - **Environment safety (`ACA Sandboxes`)**: Sensitive PII computation and untrusted document/code execution run inside ephemeral microVMs with no host credentials and a default-deny egress proxy.
 - **Operational self-awareness (`Azure SRE Agent`)**: Telemetry, continuous evaluations, and human-reviewed or autonomous remediation span every application tier from day one.
 
