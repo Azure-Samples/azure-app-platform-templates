@@ -425,21 +425,33 @@ if (-not $SkipSkills) {
         $funcCommand = if ($env:OS -eq 'Windows_NT') { 'func.cmd' } else { 'func' }
         $originalTemp = $env:TEMP
         $originalTmp = $env:TMP
-        try {
-            if ($env:OS -eq 'Windows_NT') {
-                # Core Tools stores local host secrets under the temp directory.
-                $skillTemp = Join-Path $RepoRoot ".dev-temp\$name"
-                New-Item -ItemType Directory -Force -Path $skillTemp | Out-Null
-                $env:TEMP = $skillTemp
-                $env:TMP = $skillTemp
+        for ($attempt = 1; $attempt -le 2; $attempt++) {
+            try {
+                if ($env:OS -eq 'Windows_NT') {
+                    # Core Tools stores local host secrets under the temp directory.
+                    $skillTemp = Join-Path $RepoRoot ".dev-temp\$name"
+                    New-Item -ItemType Directory -Force -Path $skillTemp | Out-Null
+                    $env:TEMP = $skillTemp
+                    $env:TMP = $skillTemp
+                }
+                $skillProcess = Start-Tracked -Name $name -WorkingDirectory $skillDir -FilePath 'uv' `
+                    -ArgumentList @('run', $funcCommand, 'start', '--port', "$port") -Port $port
+            } finally {
+                $env:TEMP = $originalTemp
+                $env:TMP = $originalTmp
             }
-            $null = Start-Tracked -Name $name -WorkingDirectory $skillDir -FilePath 'uv' `
-                -ArgumentList @('run', $funcCommand, 'start', '--port', "$port") -Port $port
-        } finally {
-            $env:TEMP = $originalTemp
-            $env:TMP = $originalTmp
-        }
-        if (-not (Wait-PortListening -Name $name -Port $port)) {
+            if (Wait-PortListening -Name $name -Port $port) {
+                break
+            }
+            if (
+                $attempt -eq 1 -and -not (Test-TrackedProcess -Entry $skillProcess) -and
+                (Select-String -LiteralPath $skillProcess.errlog -SimpleMatch "Value cannot be null. (Parameter 'provider')" -Quiet)
+            ) {
+                $null = $processes.Remove($skillProcess)
+                Save-ProcessState
+                Write-Warning "[$name] Azure Functions Core Tools reported a startup provider error. Retrying once."
+                continue
+            }
             Save-ProcessState
             & (Join-Path $DealerScriptRoot 'dev-stop.ps1')
             throw "[$name] failed to start. The agent and web app were not started; see the log tails above."

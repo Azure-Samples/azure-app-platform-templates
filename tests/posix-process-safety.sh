@@ -154,3 +154,114 @@ if curl -sS -o /dev/null "http://127.0.0.1:$agent_port/healthz" 2>/dev/null; the
   exit 1
 fi
 echo "app-service-builder-ai-gateway: unhealthy agent blocks startup"
+
+for name in dealership-e2e shared/dealer; do
+  app="$test_root/${name//\//-}-skill-order"
+  mkdir -p "$app/scripts" "$app/bin"
+  cp "$root/templates/$name/scripts/dev-start.sh" "$app/scripts/dev-start.sh"
+  cp "$root/templates/$name/scripts/dev-stop.sh" "$app/scripts/dev-stop.sh"
+  printf 'load_app_ports() { :; }\n' >"$app/scripts/load-ports.sh"
+  cat >"$app/bin/azurite" <<'EOF'
+#!/usr/bin/env bash
+exec node "$AZURITE_FIXTURE" "$@"
+EOF
+  cat >"$app/azurite.cjs" <<'EOF'
+const net = require("node:net");
+for (const flag of ["--blobPort", "--queuePort", "--tablePort"]) {
+  const port = Number(process.argv[process.argv.indexOf(flag) + 1]);
+  net.createServer().listen(port, "127.0.0.1");
+}
+EOF
+  cat >"$app/bin/uv" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${PWD##*/}" == "inventory-search" ]]; then
+  attempts=0
+  [[ ! -f "$FIRST_SKILL_ATTEMPTS" ]] || read -r attempts <"$FIRST_SKILL_ATTEMPTS"
+  attempts=$((attempts + 1))
+  printf '%s\n' "$attempts" >"$FIRST_SKILL_ATTEMPTS"
+  if [[ "$SKILL_FAILURE" == "ordinary" || "$attempts" == "1" ]]; then
+    : >"$FIRST_SKILL_STARTED"
+    while [[ ! -f "$RELEASE_FIRST_SKILL" ]]; do sleep 0.05; done
+    if [[ "$SKILL_FAILURE" == "provider" ]]; then
+      echo "Value cannot be null. (Parameter 'provider')" >&2
+    else
+      echo "fixture skill failed" >&2
+    fi
+    exit 17
+  fi
+fi
+port="${@: -1}"
+exec node -e 'require("node:net").createServer().listen(Number(process.argv[1]), "127.0.0.1")' "$port"
+EOF
+  chmod +x "$app/bin/azurite" "$app/bin/uv" "$app/scripts/dev-stop.sh"
+  for skill in inventory-search trade-in-value rate-sheet deal-doc; do
+    mkdir -p "$app/src/skills/$skill"
+    printf '{"Values":{"AZURE_FUNCTIONS_AGENTS_PROVIDER":"foundry"}}\n' \
+      >"$app/src/skills/$skill/local.settings.json"
+  done
+  read -r WEB_PORT AGENT_PORT INVENTORY_SEARCH_PORT TRADE_IN_VALUE_PORT RATE_SHEET_PORT \
+    DEAL_DOC_PORT AZURITE_BLOB_PORT AZURITE_QUEUE_PORT AZURITE_TABLE_PORT < <(python3 -c '
+import socket
+sockets = [socket.socket() for _ in range(9)]
+for sock in sockets:
+    sock.bind(("127.0.0.1", 0))
+print(*(sock.getsockname()[1] for sock in sockets))
+for sock in sockets:
+    sock.close()
+')
+  export PATH="$app/bin:$PATH" WEB_PORT AGENT_PORT INVENTORY_SEARCH_PORT TRADE_IN_VALUE_PORT \
+    RATE_SHEET_PORT DEAL_DOC_PORT AZURITE_BLOB_PORT AZURITE_QUEUE_PORT AZURITE_TABLE_PORT
+  export AZURITE_FIXTURE="$app/azurite.cjs" FIRST_SKILL_STARTED="$app/first-started" \
+    RELEASE_FIRST_SKILL="$app/release-first" FIRST_SKILL_ATTEMPTS="$app/inventory-attempts"
+  for SKILL_FAILURE in ordinary provider; do
+    export SKILL_FAILURE
+    rm -f "$FIRST_SKILL_STARTED" "$RELEASE_FIRST_SKILL" "$FIRST_SKILL_ATTEMPTS"
+    bash "$app/scripts/dev-start.sh" --skip-agent --skip-web >"$app/start-output" 2>&1 &
+    child=$!
+    deadline=$((SECONDS + 30))
+    until [[ -f "$FIRST_SKILL_STARTED" ]] &&
+      [[ -f "$app/.dev-run/processes.posix.tsv" ]] &&
+      awk -F '\t' '$1 == "inventory-search" && $3 != "" && $4 != "" { found=1 } END { exit !found }' \
+        "$app/.dev-run/processes.posix.tsv"; do
+      if ! kill -0 "$child" 2>/dev/null || ((SECONDS >= deadline)); then
+        echo "$name did not start the first skill" >&2
+        exit 1
+      fi
+      sleep 0.05
+    done
+    : >"$RELEASE_FIRST_SKILL"
+    result=0
+    wait "$child" || result=$?
+    child=""
+    if [[ "$SKILL_FAILURE" == "ordinary" ]]; then
+      if ((result == 0)); then
+        echo "$name accepted a failed first skill" >&2
+        exit 1
+      fi
+      grep -q 'fixture skill failed' "$app/.dev-run/logs/inventory-search.err.log"
+      if [[ -e "$app/.dev-run/logs/trade-in-value.out.log" ]]; then
+        echo "$name started a later skill before the first was ready" >&2
+        exit 1
+      fi
+    else
+      if ((result != 0)); then
+        cat "$app/start-output" >&2
+        echo "$name did not recover from the transient provider error" >&2
+        exit 1
+      fi
+      [[ "$(cat "$FIRST_SKILL_ATTEMPTS")" == "2" ]]
+      grep -q 'provider error. Retrying once.' "$app/start-output"
+      bash "$app/scripts/dev-stop.sh" >"$app/stop-output" 2>&1
+    fi
+    [[ ! -f "$app/.dev-run/processes.posix.tsv" ]]
+    python3 -c '
+import socket, sys
+for port in map(int, sys.argv[1:]):
+    with socket.socket() as sock:
+        sock.settimeout(1)
+        if sock.connect_ex(("127.0.0.1", port)) == 0:
+            raise SystemExit(f"fixture listener {port} is still running")
+' "$AZURITE_BLOB_PORT" "$AZURITE_QUEUE_PORT" "$AZURITE_TABLE_PORT"
+  done
+  echo "$name: startup failures stop safely and transient provider errors retry once"
+done

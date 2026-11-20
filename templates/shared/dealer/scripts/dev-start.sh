@@ -362,16 +362,20 @@ NODE
     if [[ "$FORCE_CLEAN" == "1" && -d "$skill_dir/.venv" ]]; then
       rm -rf "$skill_dir/.venv"
     fi
-    start_tracked "$name" "$port" "$skill_dir" uv run func start --port "$port" ||
-      fail_and_stop "[$name] could not start on port $port."
+    for attempt in 1 2; do
+      start_tracked "$name" "$port" "$skill_dir" uv run func start --port "$port" ||
+        fail_and_stop "[$name] could not start on port $port."
+      if wait_port "$name" "$port"; then
+        break
+      fi
+      if ((attempt == 1)) && ! tracked_process_alive "$name" "$port" &&
+        grep -Fq "Value cannot be null. (Parameter 'provider')" "$LOG_DIR/$name.err.log"; then
+        echo "[$name] Azure Functions Core Tools reported a startup provider error. Retrying once." >&2
+        continue
+      fi
+      fail_and_stop "[$name] failed to start. The agent and web app were not started."
+    done
   done
-
-  skills_ready=1
-  for i in "${!skill_names[@]}"; do
-    wait_port "${skill_names[$i]}" "${skill_ports[$i]}" || skills_ready=0
-  done
-  ((skills_ready == 1)) ||
-    fail_and_stop "One or more Hosted Skills failed to start. The agent and web app were not started."
 fi
 
 if ((SKIP_AGENT == 0)); then

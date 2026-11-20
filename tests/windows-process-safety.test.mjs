@@ -318,3 +318,131 @@ for (const name of ["dealership-e2e", "shared/dealer"]) {
     }
   });
 }
+
+test("dealership retries a transient Functions provider failure once", {
+  skip: process.platform !== "win32" && "Windows skill startup test",
+  timeout: 240_000,
+}, async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "dealer-provider-retry-"));
+  const scripts = path.join(root, "scripts");
+  const bin = path.join(root, "bin");
+  const azurite = path.join(bin, "node_modules", "azurite", "dist", "src");
+  const state = path.join(root, ".dev-run", "processes.json");
+  await mkdir(scripts, { recursive: true });
+  await mkdir(azurite, { recursive: true });
+  await writeFile(path.join(scripts, "load-ports.ps1"), "function Import-AppPorts($Root) {}\n");
+  for (const script of ["dev-start", "dev-stop"]) {
+    await cp(path.join(templates, "dealership-e2e", "scripts", `${script}.ps1`),
+      path.join(scripts, `${script}.ps1`));
+  }
+  await link(process.execPath, path.join(bin, "uv.exe"));
+  await writeFile(path.join(bin, "azurite.cmd"), "@echo off\r\nexit /b 0\r\n");
+  await writeFile(path.join(azurite, "azurite.js"), [
+    "const net = require('node:net');",
+    "for (const flag of ['--blobPort', '--queuePort', '--tablePort']) {",
+    "  const port = Number(process.argv[process.argv.indexOf(flag) + 1]);",
+    "  net.createServer().listen(port, '127.0.0.1');",
+    "}",
+  ].join("\n"));
+  for (const skill of ["inventory-search", "trade-in-value", "rate-sheet", "deal-doc"]) {
+    const directory = path.join(root, "src", "skills", skill);
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "local.settings.json"),
+      JSON.stringify({ Values: { AZURE_FUNCTIONS_AGENTS_PROVIDER: "foundry" } }));
+    await writeFile(path.join(directory, "run"), [
+      "const fs = require('node:fs'), path = require('node:path'), net = require('node:net');",
+      "const name = path.basename(process.cwd()), marker = path.join(process.env.FIXTURE_ROOT, name + '.attempts');",
+      "const count = fs.existsSync(marker) ? Number(fs.readFileSync(marker, 'utf8')) + 1 : 1;",
+      "fs.writeFileSync(marker, String(count));",
+      "if (name === 'inventory-search' && (count === 1 || process.env.ALWAYS_FAIL === '1')) {",
+      "  console.error(\"Value cannot be null. (Parameter 'provider')\"); process.exit(17);",
+      "}",
+      "net.createServer().listen(Number(process.argv.at(-1)), '127.0.0.1');",
+    ].join("\n"));
+  }
+  const names = [
+    "WEB_PORT", "AGENT_PORT", "INVENTORY_SEARCH_PORT", "TRADE_IN_VALUE_PORT", "RATE_SHEET_PORT",
+    "DEAL_DOC_PORT", "AZURITE_BLOB_PORT", "AZURITE_QUEUE_PORT", "AZURITE_TABLE_PORT",
+  ];
+  const probes = [];
+  for (let index = 0; index < names.length; index++) {
+    const probe = net.createServer();
+    await new Promise((resolve, reject) => probe.once("error", reject).listen(0, "127.0.0.1", resolve));
+    probes.push(probe);
+  }
+  const ports = probes.map(probe => probe.address().port);
+  await Promise.all(probes.map(probe => new Promise((resolve, reject) =>
+    probe.close(error => error ? reject(error) : resolve()))));
+  const env = {
+    ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, FIXTURE_ROOT: root,
+    PIP_INDEX_URL: "https://packages.example.test/simple",
+    ...Object.fromEntries(names.map((key, index) => [key, String(ports[index])])),
+  };
+  for (const key of Object.keys(env)) {
+    if (/TOKEN|SECRET|PASSWORD|CREDENTIAL|(?:API|ACCESS|PRIVATE)_KEY/i.test(key)) delete env[key];
+  }
+  delete env.DEALER_REPO_ROOT;
+  delete env.DEALER_SCRIPT_DIR;
+  delete env.FORCE_CLEAN;
+  const invoke = (script, extraEnv = {}) => spawnSync("pwsh", [
+    "-NoProfile", "-File", path.join(scripts, `${script}.ps1`),
+    ...(script === "dev-start" ? ["-SkipAgent", "-SkipWeb"] : []),
+  ], { encoding: "utf8", env: { ...env, ...extraEnv }, timeout: 90_000 });
+  t.after(async () => {
+    try {
+      await readFile(state);
+      const stopped = invoke("dev-stop");
+      assert.equal(stopped.status, 0, stopped.stderr);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const started = invoke("dev-start");
+  assert.equal(started.status, 0, `${started.stdout}\n${started.stderr}`);
+  assert.match(started.stdout, /provider error.*Retrying once/i);
+  assert.equal(await readFile(path.join(root, "inventory-search.attempts"), "utf8"), "2");
+  assert.equal(await readFile(path.join(root, "deal-doc.attempts"), "utf8"), "1");
+  const tracked = JSON.parse(await readFile(state, "utf8"));
+  assert.equal(tracked.filter(entry => entry.name === "inventory-search").length, 1);
+  const stopped = invoke("dev-stop");
+  assert.equal(stopped.status, 0, stopped.stderr);
+  await rm(path.join(root, "inventory-search.attempts"));
+
+  const failed = invoke("dev-start", { ALWAYS_FAIL: "1" });
+  assert.notEqual(failed.status, 0);
+  assert.equal(await readFile(path.join(root, "inventory-search.attempts"), "utf8"), "2");
+  assert.equal(await readFile(path.join(root, "deal-doc.attempts"), "utf8"), "1");
+  await assert.rejects(readFile(state), { code: "ENOENT" });
+});
+
+test("a Windows Git archive produces runnable Unix startup scripts", {
+  timeout: 30_000,
+}, async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "template-unix-archive-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = path.dirname(templates);
+  const archive = path.join(root, "templates.tar");
+  const paths = [
+    "templates/dealership-e2e/scripts/dev-start.sh",
+    "templates/app-service-builder-vite/scripts/dev-start.sh.template",
+    "templates/shared/load-ports.sh",
+  ];
+  const archived = spawnSync("git", [
+    "-C", repository, "-c", "core.autocrlf=true", "archive", "--worktree-attributes",
+    "--format=tar", `--output=${archive}`, "HEAD", ...paths,
+  ], { encoding: "utf8" });
+  assert.equal(archived.status, 0, archived.stderr);
+  const unpacked = spawnSync("tar", ["-xf", archive, "-C", root], { encoding: "utf8" });
+  assert.equal(unpacked.status, 0, unpacked.stderr);
+  await cp(path.join(root, "templates", "shared", "load-ports.sh"),
+    path.join(root, "templates", "app-service-builder-vite", "scripts", "load-ports.sh"));
+  for (const relative of paths.slice(0, 2)) {
+    const result = spawnSync("bash", [path.join(root, ...relative.split("/")), "--help"], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Usage:/);
+  }
+});
