@@ -439,18 +439,11 @@ if (-not $SkipSkills) {
             $env:TEMP = $originalTemp
             $env:TMP = $originalTmp
         }
-    }
-
-    $skillsReady = $true
-    foreach ($name in $Skills.Keys) {
-        if (-not (Wait-PortListening -Name $name -Port $Skills[$name])) {
-            $skillsReady = $false
+        if (-not (Wait-PortListening -Name $name -Port $port)) {
+            Save-ProcessState
+            & (Join-Path $DealerScriptRoot 'dev-stop.ps1')
+            throw "[$name] failed to start. The agent and web app were not started; see the log tails above."
         }
-    }
-    if (-not $skillsReady) {
-        Save-ProcessState
-        & (Join-Path $DealerScriptRoot 'dev-stop.ps1')
-        throw "One or more Hosted Skills failed to start. The agent and web app were not started; see the log tails above."
     }
 }
 

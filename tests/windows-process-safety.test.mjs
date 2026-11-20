@@ -226,3 +226,95 @@ test("the Builder gateway starter does not launch web when its agent stays unhea
   await assert.rejects(readFile(state), { code: "ENOENT" });
   await assert.rejects(fetch(`http://127.0.0.1:${ports[0]}/healthz`));
 });
+
+for (const name of ["dealership-e2e", "shared/dealer"]) {
+  test(`${name} stops before launching later skills when the first skill fails`, {
+    skip: process.platform !== "win32" && "Windows skill startup test",
+    timeout: 60_000,
+  }, async t => {
+    const root = await mkdtemp(path.join(tmpdir(), "dealer-skill-order-"));
+    const scripts = path.join(root, "scripts");
+    const bin = path.join(root, "bin");
+    const azurite = path.join(bin, "node_modules", "azurite", "dist", "src");
+    const state = path.join(root, ".dev-run", "processes.json");
+    await mkdir(scripts, { recursive: true });
+    await mkdir(azurite, { recursive: true });
+    await writeFile(path.join(scripts, "load-ports.ps1"), "function Import-AppPorts($Root) {}\n");
+    for (const script of ["dev-start", "dev-stop"]) {
+      await cp(path.join(templates, name, "scripts", `${script}.ps1`), path.join(scripts, `${script}.ps1`));
+    }
+    await link(process.execPath, path.join(bin, "uv.exe"));
+    await writeFile(path.join(bin, "azurite.cmd"), "@echo off\r\nexit /b 0\r\n");
+    await writeFile(path.join(azurite, "azurite.js"), [
+      "const net = require('node:net');",
+      "for (const flag of ['--blobPort', '--queuePort', '--tablePort']) {",
+      "  const port = Number(process.argv[process.argv.indexOf(flag) + 1]);",
+      "  net.createServer().listen(port, '127.0.0.1');",
+      "}",
+    ].join("\n"));
+    for (const skill of ["inventory-search", "trade-in-value", "rate-sheet", "deal-doc"]) {
+      const directory = path.join(root, "src", "skills", skill);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "local.settings.json"),
+        JSON.stringify({ Values: { AZURE_FUNCTIONS_AGENTS_PROVIDER: "foundry" } }));
+      await writeFile(path.join(directory, "run"), "console.error('fixture skill failed'); process.exit(17);\n");
+    }
+    const names = [
+      "WEB_PORT", "AGENT_PORT", "INVENTORY_SEARCH_PORT", "TRADE_IN_VALUE_PORT", "RATE_SHEET_PORT",
+      "DEAL_DOC_PORT", "AZURITE_BLOB_PORT", "AZURITE_QUEUE_PORT", "AZURITE_TABLE_PORT",
+    ];
+    const probes = [];
+    for (let index = 0; index < names.length; index++) {
+      const probe = net.createServer();
+      await new Promise((resolve, reject) => probe.once("error", reject).listen(0, "127.0.0.1", resolve));
+      probes.push(probe);
+    }
+    const ports = probes.map(probe => probe.address().port);
+    await Promise.all(probes.map(probe => new Promise((resolve, reject) =>
+      probe.close(error => error ? reject(error) : resolve()))));
+    const env = {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      PIP_INDEX_URL: "https://packages.example.test/simple",
+      ...Object.fromEntries(names.map((key, index) => [key, String(ports[index])])),
+    };
+    for (const key of Object.keys(env)) {
+      if (/TOKEN|SECRET|PASSWORD|CREDENTIAL|(?:API|ACCESS|PRIVATE)_KEY/i.test(key)) delete env[key];
+    }
+    delete env.DEALER_REPO_ROOT;
+    delete env.DEALER_SCRIPT_DIR;
+    delete env.FORCE_CLEAN;
+    t.after(async () => {
+      try {
+        await readFile(state);
+        const stopped = spawnSync("pwsh", ["-NoProfile", "-File", path.join(scripts, "dev-stop.ps1")], {
+          encoding: "utf8", env, timeout: 15_000,
+        });
+        assert.equal(stopped.status, 0, stopped.stderr);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      await rm(root, { recursive: true, force: true });
+    });
+
+    const started = spawnSync("pwsh", [
+      "-NoProfile", "-File", path.join(scripts, "dev-start.ps1"), "-SkipAgent", "-SkipWeb",
+    ], { encoding: "utf8", env, timeout: 45_000 });
+    assert.notEqual(started.status, 0);
+    assert.match(`${started.stdout}\n${started.stderr}`, /failed to start/i);
+    assert.match(await readFile(path.join(root, ".dev-run", "logs", "inventory-search.err.log"), "utf8"),
+      /fixture skill failed/);
+    await assert.rejects(readFile(path.join(root, ".dev-run", "logs", "trade-in-value.out.log")), { code: "ENOENT" });
+    await assert.rejects(readFile(state), { code: "ENOENT" });
+    for (const port of ports.slice(-3)) {
+      const listening = await new Promise((resolve, reject) => {
+        const socket = net.connect({ host: "127.0.0.1", port });
+        socket.setTimeout(2_000);
+        socket.once("connect", () => { socket.destroy(); resolve(true); });
+        socket.once("error", error => error.code === "ECONNREFUSED" ? resolve(false) : reject(error));
+        socket.once("timeout", () => { socket.destroy(); reject(new Error("Port check timed out")); });
+      });
+      assert.equal(listening, false);
+    }
+  });
+}
