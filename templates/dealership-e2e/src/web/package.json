@@ -14,7 +14,7 @@
   "dependencies": {
     "@fluentui/react-headless-components-preview": "0.4.1",
     "@primer/octicons-react": "19.41.0",
-    "next": "16.3.1",
+    "next": "16.4.5",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-markdown": "^10.1.0",
