@@ -135,12 +135,16 @@ $Skills = [ordered]@{
     'deal-doc'         = $DealDocPort
 }
 
+Remove-Item Env:UV_FROZEN, Env:UV_LOCKED, Env:UV_NO_SYNC, Env:UV_OFFLINE -ErrorAction SilentlyContinue
 $indexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } elseif ($env:UV_INDEX_URL) { $env:UV_INDEX_URL } else { $env:UV_DEFAULT_INDEX }
 if (-not $indexUrl -and (Get-Command python -ErrorAction SilentlyContinue)) {
     $configuredIndex = & python -m pip config get global.index-url 2>$null
     if ($LASTEXITCODE -eq 0) { $indexUrl = $configuredIndex }
 }
-if ($indexUrl) { $env:PIP_INDEX_URL = $env:UV_INDEX_URL = $env:UV_DEFAULT_INDEX = $indexUrl }
+if ($indexUrl) {
+    Remove-Item Env:PIP_EXTRA_INDEX_URL, Env:UV_EXTRA_INDEX_URL -ErrorAction SilentlyContinue
+    $env:PIP_INDEX_URL = $env:UV_INDEX_URL = $env:UV_DEFAULT_INDEX = $indexUrl
+}
 
 # Existing state (if any) from a prior run this script didn't clean up.
 $existing = @()

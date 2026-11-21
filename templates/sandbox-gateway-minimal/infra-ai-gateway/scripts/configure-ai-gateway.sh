@@ -2,8 +2,10 @@
 set -euo pipefail
 umask 077
 
+unset UV_FROZEN UV_LOCKED UV_NO_SYNC UV_OFFLINE
 index_url="${PIP_INDEX_URL:-${UV_INDEX_URL:-${UV_DEFAULT_INDEX:-}}}"
 if [[ -n "$index_url" ]]; then
+  unset PIP_EXTRA_INDEX_URL UV_EXTRA_INDEX_URL
   export PIP_INDEX_URL="$index_url" UV_INDEX_URL="$index_url" UV_DEFAULT_INDEX="$index_url"
 fi
 

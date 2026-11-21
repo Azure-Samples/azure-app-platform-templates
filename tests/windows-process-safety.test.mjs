@@ -10,6 +10,57 @@ import test from "node:test";
 
 const templates = fileURLToPath(new URL("../templates", import.meta.url));
 
+for (const name of ["sandbox-gateway-minimal", "sandboxes-minimal"]) {
+  test(`${name} clears inherited uv flags before sync and restores no-sync for runtime`, {
+    skip: spawnSync("pwsh", ["-NoProfile", "-Command", "exit 0"]).status !== 0 && "PowerShell is required",
+    timeout: 30_000,
+  }, async t => {
+    const root = await mkdtemp(path.join(tmpdir(), "template-uv-env-"));
+    const scripts = path.join(root, "scripts");
+    await mkdir(scripts);
+    await mkdir(path.join(root, "src", "agent"), { recursive: true });
+    await cp(path.join(templates, name, "scripts", "dev-start.ps1.template"),
+      path.join(scripts, "dev-start.ps1"));
+    await writeFile(path.join(scripts, "load-ports.ps1"), "function Import-AppPorts($Root) {}\n");
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const variables = [
+      "PIP_INDEX_URL", "UV_INDEX_URL", "UV_DEFAULT_INDEX",
+      "UV_FROZEN", "UV_LOCKED", "UV_NO_SYNC", "UV_OFFLINE",
+      "PIP_EXTRA_INDEX_URL", "UV_EXTRA_INDEX_URL",
+    ];
+    await writeFile(path.join(root, "probe.ps1"), [
+      "function uv {",
+      `  $snapshot = @{}; foreach ($name in @(${variables.map(v => `'${v}'`).join(", ")})) {`,
+      '    $snapshot[$name] = [Environment]::GetEnvironmentVariable($name)',
+      "  }",
+      '  $snapshot | ConvertTo-Json -Compress | Add-Content -LiteralPath $env:UV_ENV_MARKER',
+      '  $global:LASTEXITCODE = if ($args[0] -eq "sync") { 0 } else { 23 }',
+      "}",
+      '& (Join-Path $PSScriptRoot "scripts/dev-start.ps1")',
+    ].join("\n"));
+    for (const indexVariable of variables.slice(0, 3)) {
+      const marker = path.join(root, `${indexVariable}.jsonl`);
+      const env = { ...process.env, UV_ENV_MARKER: marker };
+      for (const variable of variables.slice(0, 3)) delete env[variable];
+      for (const variable of variables.slice(3, 7)) env[variable] = "1";
+      env.PIP_EXTRA_INDEX_URL = env.UV_EXTRA_INDEX_URL = "https://invalid.example/simple";
+      env[indexVariable] = "https://packages.example.test/simple";
+      const result = spawnSync("pwsh", ["-NoProfile", "-File", path.join(root, "probe.ps1")], {
+        env, encoding: "utf8", timeout: 10_000,
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /Runtime configuration failed/i);
+      const snapshots = (await readFile(marker, "utf8")).trim().split(/\r?\n/).map(line => JSON.parse(line));
+      assert.equal(snapshots.length, 2);
+      const expected = Object.fromEntries(variables.map(variable => [
+        variable, variables.slice(0, 3).includes(variable) ? "https://packages.example.test/simple" : null,
+      ]));
+      assert.deepEqual(snapshots[0], expected);
+      assert.deepEqual(snapshots[1], { ...expected, UV_NO_SYNC: "1" });
+    }
+  });
+}
+
 for (const name of [
   "empty-starter-app", "app-service-builder-vite", "app-service-builder-ai-gateway",
   "sandboxes-minimal", "sandbox-gateway-minimal", "dealership-e2e", "shared/dealer",
@@ -103,6 +154,7 @@ test("the Vite starter records and stops its own process while preserving packag
     ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, WEB_PORT: String(port),
     PIP_INDEX_URL: "https://packages.example.test/simple", UV_INDEX_URL: "https://other.example.test/simple",
     UV_DEFAULT_INDEX: "", UV_OFFLINE: "1",
+    PIP_EXTRA_INDEX_URL: "https://invalid.example/simple", UV_EXTRA_INDEX_URL: "https://invalid.example/simple",
   };
   delete env.DEALER_REPO_ROOT;
   const invoke = async script => {
@@ -128,7 +180,7 @@ test("the Vite starter records and stops its own process while preserving packag
   const started = await invoke("dev-start");
   assert.equal(started.code, 0, started.output);
   const response = await fetch(`http://127.0.0.1:${port}/`);
-  assert.deepEqual(await response.json(), { index: "https://packages.example.test/simple", offline: "1" });
+  assert.deepEqual(await response.json(), { index: "https://packages.example.test/simple" });
   const records = JSON.parse(await readFile(state, "utf8"));
   const record = Array.isArray(records) ? records[0] : records;
   assert.ok(record.pid > 0 && record.startedAt);

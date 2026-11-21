@@ -62,6 +62,46 @@ for name in empty-starter-app app-service-builder-vite app-service-builder-ai-ga
   echo "$name: process identity checks passed"
 done
 
+for name in sandbox-gateway-minimal sandboxes-minimal; do
+  app="$test_root/$name-uv-env"
+  mkdir -p "$app/scripts" "$app/src/agent" "$app/bin"
+  cp "$root/templates/$name/scripts/dev-start.sh" "$app/scripts/dev-start.sh"
+  printf 'load_app_ports() { :; }\n' >"$app/scripts/load-ports.sh"
+  cat >"$app/bin/uv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -z "${UV_FROZEN+x}${UV_LOCKED+x}${UV_OFFLINE+x}" ]]
+[[ "$PIP_INDEX_URL" == "$EXPECTED_INDEX" && "$UV_INDEX_URL" == "$EXPECTED_INDEX" && "$UV_DEFAULT_INDEX" == "$EXPECTED_INDEX" ]]
+[[ -z "${PIP_EXTRA_INDEX_URL+x}${UV_EXTRA_INDEX_URL+x}" ]]
+if [[ "$1" == "sync" ]]; then
+  [[ -z "${UV_NO_SYNC+x}" ]]
+  printf 'synced\n' >"$SYNC_MARKER"
+  exit 0
+fi
+[[ "$UV_NO_SYNC" == "1" && -f "$SYNC_MARKER" ]]
+printf 'checked\n' >"$RUNTIME_MARKER"
+exit 23
+EOF
+  chmod +x "$app/bin/uv" "$app/scripts/dev-start.sh"
+  for index_variable in PIP_INDEX_URL UV_INDEX_URL UV_DEFAULT_INDEX; do
+    (
+      unset PIP_INDEX_URL UV_INDEX_URL UV_DEFAULT_INDEX
+      export "$index_variable=https://packages.example.test/simple"
+      export EXPECTED_INDEX="https://packages.example.test/simple"
+      export SYNC_MARKER="$app/synced-$index_variable" RUNTIME_MARKER="$app/checked-$index_variable"
+      export UV_FROZEN=1 UV_LOCKED=1 UV_NO_SYNC=1 UV_OFFLINE=1
+      export PIP_EXTRA_INDEX_URL="https://invalid.example/simple" UV_EXTRA_INDEX_URL="https://invalid.example/simple"
+      cd "$app"
+      if PATH="$app/bin:$PATH" ./scripts/dev-start.sh >"$app/start-output" 2>&1; then
+        echo "$name ignored the runtime check failure" >&2
+        exit 1
+      fi
+      [[ -f "$SYNC_MARKER" && -f "$RUNTIME_MARKER" ]]
+    )
+  done
+  echo "$name: inherited uv flags and extra indexes cleared before sync; runtime no-sync retained"
+done
+
 app="$test_root/vite-start"
 mkdir -p "$app/scripts" "$app/bin" "$app/node_modules/vite" "$app/node_modules/.bin" "$app/dist"
 cp "$root/templates/app-service-builder-vite/scripts/dev-start.sh.template" "$app/scripts/dev-start.sh"
@@ -94,10 +134,11 @@ printf 'fixture\n' >"$app/dist/index.html"
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 export PATH="$app/bin:$PATH" WEB_PORT="$port" FIXTURE_SERVER="$app/server.py"
 export PIP_INDEX_URL="https://packages.example.test/simple" UV_INDEX_URL="https://other.example.test/simple" UV_OFFLINE="1"
+export PIP_EXTRA_INDEX_URL="https://invalid.example/simple" UV_EXTRA_INDEX_URL="https://invalid.example/simple"
 bash "$app/scripts/dev-start.sh" >"$app/start-output" 2>&1
 child="$(awk -F '\t' '$1 == "web" {print $3}' "$app/.dev-run/processes.posix.tsv")"
 [[ -n "$child" ]]
-curl -fsS "http://127.0.0.1:$port/" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p == {"index":"https://packages.example.test/simple","offline":"1"}'
+curl -fsS "http://127.0.0.1:$port/" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p == {"index":"https://packages.example.test/simple","offline":None}'
 bash "$app/scripts/dev-stop.sh" >"$app/stop-output" 2>&1
 if kill -0 "$child" 2>/dev/null; then
   echo "Vite fixture process remains after stop" >&2
@@ -115,10 +156,14 @@ printf 'load_app_ports() { :; }\n' >"$app/scripts/load-ports.sh"
 printf '# fixture\n' >"$app/src/agent/main.py"
 cat >"$app/bin/uv" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
+[[ -z "${UV_FROZEN+x}${UV_LOCKED+x}${UV_OFFLINE+x}${PIP_EXTRA_INDEX_URL+x}${UV_EXTRA_INDEX_URL+x}" ]]
 if [[ "$1" == "sync" ]]; then
+  [[ -z "${UV_NO_SYNC+x}" ]]
   printf 'synced\n' >"$SYNC_MARKER"
   exit 0
 fi
+[[ "$UV_NO_SYNC" == "1" ]]
 if [[ "$2" == "main.py" ]]; then
   exec python3 "$AGENT_SERVER"
 fi
@@ -142,6 +187,7 @@ EOF
 chmod +x "$app/bin/uv" "$app/scripts/dev-stop.sh"
 read -r agent_port web_port < <(python3 -c 'import socket; a=socket.socket(); b=socket.socket(); a.bind(("127.0.0.1",0)); b.bind(("127.0.0.1",0)); print(a.getsockname()[1],b.getsockname()[1]); a.close(); b.close()')
 export PATH="$app/bin:$PATH" AGENT_PORT="$agent_port" WEB_PORT="$web_port"
+export UV_FROZEN=1 UV_LOCKED=1 UV_NO_SYNC=1 UV_OFFLINE=1
 export SYNC_MARKER="$app/synced" WEB_MARKER="$app/web-started" AGENT_SERVER="$app/agent.py" WEB_SERVER="$app/web.py"
 if bash "$app/scripts/dev-start.sh" >"$app/start-output" 2>&1; then
   echo "An unhealthy agent allowed Builder startup to succeed" >&2
@@ -220,6 +266,8 @@ exit 0
 EOF
 cat >"$app/bin/uv" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
+[[ -z "${UV_FROZEN+x}${UV_LOCKED+x}${UV_NO_SYNC+x}${UV_OFFLINE+x}${PIP_EXTRA_INDEX_URL+x}${UV_EXTRA_INDEX_URL+x}" ]]
 last=""
 for arg in "$@"; do last="$arg"; done
 exec python3 "$MCP_FIXTURE_SERVER" "$last"

@@ -50,6 +50,7 @@ if (-not $FuncCommand) {
   exit 1
 }
 
+Remove-Item Env:UV_FROZEN, Env:UV_LOCKED, Env:UV_NO_SYNC, Env:UV_OFFLINE -ErrorAction SilentlyContinue
 $IndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } elseif ($env:UV_INDEX_URL) { $env:UV_INDEX_URL } else { $env:UV_DEFAULT_INDEX }
 if (-not $IndexUrl -and (Get-Command python -ErrorAction SilentlyContinue)) {
   $ConfiguredIndex = & python -m pip config get global.index-url 2>$null
@@ -58,6 +59,7 @@ if (-not $IndexUrl -and (Get-Command python -ErrorAction SilentlyContinue)) {
   }
 }
 if ($IndexUrl) {
+  Remove-Item Env:PIP_EXTRA_INDEX_URL, Env:UV_EXTRA_INDEX_URL -ErrorAction SilentlyContinue
   $env:PIP_INDEX_URL = $env:UV_INDEX_URL = $env:UV_DEFAULT_INDEX = $IndexUrl
 }
 

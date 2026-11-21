@@ -6,8 +6,12 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+Remove-Item Env:UV_FROZEN, Env:UV_LOCKED, Env:UV_NO_SYNC, Env:UV_OFFLINE -ErrorAction SilentlyContinue
 $IndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } elseif ($env:UV_INDEX_URL) { $env:UV_INDEX_URL } else { $env:UV_DEFAULT_INDEX }
-if ($IndexUrl) { $env:PIP_INDEX_URL = $env:UV_INDEX_URL = $env:UV_DEFAULT_INDEX = $IndexUrl }
+if ($IndexUrl) {
+  Remove-Item Env:PIP_EXTRA_INDEX_URL, Env:UV_EXTRA_INDEX_URL -ErrorAction SilentlyContinue
+  $env:PIP_INDEX_URL = $env:UV_INDEX_URL = $env:UV_DEFAULT_INDEX = $IndexUrl
+}
 
 $AiGatewayApiVersion = '2025-09-01-preview'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
