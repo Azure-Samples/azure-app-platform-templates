@@ -23,8 +23,7 @@ POC scaffold for Contoso Auto Dealership Demo's **Hosted Skills tier** (plan §5
     <tool_logic>.py          # pure logic + one @tool-decorated wrapper (auto-discovered)
   host.json
   local.settings.json.example
-  pyproject.toml              # uv project + azurefunctions-agents-runtime
-  uv.lock                     # locked local development dependencies
+  pyproject.toml              # uv project + azurefunctions-agents-runtime>=0.1.0b13
   requirements.txt            # Azure Functions deployment dependencies
 ```
 
