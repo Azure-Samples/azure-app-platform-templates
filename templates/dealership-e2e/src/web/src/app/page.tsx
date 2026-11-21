@@ -5,7 +5,7 @@ import { DealStatusPanel } from "@/components/deal-status-panel";
 import { ResultsGrid } from "@/components/results-grid";
 import type { ChatMessage, ChatStreamEvent, DealStage, ReplySource, Vehicle } from "@/lib/types";
 import { useState } from "react";
-import { AlertIcon, DotFillIcon, XCircleIcon } from "@primer/octicons-react";
+import { DotFillIcon, XCircleIcon } from "@primer/octicons-react";
 import { Badge } from "@fluentui/react-headless-components-preview/badge";
 
 function makeId(): string {
@@ -26,11 +26,9 @@ export default function HomePage() {
   const [email, setEmail] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
-  // Ground truth for whether the most recent reply actually came from the
-  // real agent or the mock scenario generator — reported by the server on
-  // every response (see the "source" stream event in route.ts), since a
-  // client-side guess based on NEXT_PUBLIC_MOCK can't reflect a same-request
-  // fallback (e.g. the agent being unreachable or timing out mid-turn).
+  // Ground truth for the most recent reply outcome — reported by the server
+  // via the "source" stream event in route.ts ("agent", "agent_error", or
+  // "workflow_unavailable").
   const [lastSource, setLastSource] = useState<ReplySource | null>(null);
 
   async function runTurn(userText: string, command?: "apply") {
@@ -158,33 +156,27 @@ export default function HomePage() {
             <Badge
               data-testid="reply-source-badge"
               icon={
-                lastSource === "mock" ? (
-                  <AlertIcon size={16} aria-hidden="true" />
-                ) : lastSource === "agent" ? (
+                lastSource === "agent" ? (
                   <DotFillIcon size={16} aria-hidden="true" />
                 ) : lastSource === "agent_error" || lastSource === "workflow_unavailable" ? (
                   <XCircleIcon size={16} aria-hidden="true" />
                 ) : undefined
               }
               className={`inline-flex items-center gap-1.5 rounded-token-pill px-3 py-1 text-xs font-semibold ${
-                lastSource === "mock"
-                  ? "bg-status-warning text-white"
-                  : lastSource === "agent"
-                    ? "bg-status-success text-white"
-                    : lastSource === "agent_error" || lastSource === "workflow_unavailable"
-                      ? "bg-status-danger text-white"
-                      : "bg-accent text-accent-contrast"
+                lastSource === "agent"
+                  ? "bg-status-success text-white"
+                  : lastSource === "agent_error" || lastSource === "workflow_unavailable"
+                    ? "bg-status-danger text-white"
+                    : "bg-accent text-accent-contrast"
               }`}
             >
-              {lastSource === "mock"
-                ? "Mock agent"
-                : lastSource === "agent"
-                  ? "Live agent"
-                  : lastSource === "agent_error"
-                    ? "Live agent request failed"
-                    : lastSource === "workflow_unavailable"
-                      ? "Approval unavailable"
-                      : "Waiting for first reply…"}
+              {lastSource === "agent"
+                ? "Live agent"
+                : lastSource === "agent_error"
+                  ? "Live agent request failed"
+                  : lastSource === "workflow_unavailable"
+                    ? "Approval unavailable"
+                    : "Waiting for first reply…"}
             </Badge>
           </div>
         </div>

@@ -1,26 +1,15 @@
 # Dealership E2E Reference Sample
 
 Local reference app for **Azure App Platform**. It includes a car-buying chat,
-the `deal-finder` agent, and four Hosted Skills. The sandbox and workflow
-examples are not connected to the web app. The cloud infrastructure is a
-precursor and is not ready for an end-to-end deployment.
-
-## Quickstart (Mock Mode, No Azure Subscription Needed)
-
-```shell
-cd src/web
-npm install
-npm run dev
-```
-
-Open `http://localhost:3000` and try:
-
-```text
-Find me an EV under $40,000 with at least 250 miles of range
-```
-
-Mock replies use sample data. They do not submit applications, send approvals,
-or run a sandbox.
+the `deal-finder` agent, and four Hosted Skills. The web app has zero runtime
+agent simulation: chat requests always call the configured `deal-finder` agent
+(`AGENT_URL`) and surface `agent_error` with startup guidance if the agent is
+not running. Unwired loan-application submission controls stay visibly disabled
+in the UI (`Apply (Unavailable)`), while synthetic vehicle inventory
+(`inventory.json`) and synthetic pre-qualification credit fixtures
+(`synthetic_credit_fixtures.py`) are preserved as test/sample data. The cloud
+infrastructure in `infra/` is a precursor and is not ready for an end-to-end
+deployment.
 
 ## Full Local Stack (Azurite + 4 Hosted Skills + Agent + Web)
 
@@ -34,7 +23,11 @@ or run a sandbox.
      ```powershell
      .\scripts\dev-start.ps1
      ```
-3. Stop the local stack when finished:
+3. Open `http://localhost:3000` and try:
+   ```text
+   Find me an EV under $40,000 with at least 250 miles of range
+   ```
+4. Stop the local stack when finished:
    - macOS / Linux:
      ```bash
      ./scripts/dev-stop.sh

@@ -5,6 +5,7 @@ PREQUAL_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PREQUAL_DIR))
 
 from main import SyntheticApplication, calculate_prequalification
+from synthetic_credit_fixtures import SyntheticCreditProfile, synthetic_soft_pull
 
 
 def test_high_income_synthetic_application_is_approved_and_deterministic():
@@ -58,3 +59,16 @@ def test_real_pii_guard_must_be_explicitly_enabled_for_synthetic_data():
         assert "real PII is prohibited" in str(error)
     else:
         raise AssertionError("non-synthetic input was accepted")
+
+
+def test_synthetic_credit_fixtures_reject_non_synthetic_ids():
+    profile = synthetic_soft_pull("SYN-123-45-6789")
+    assert isinstance(profile, SyntheticCreditProfile)
+    assert 580 <= profile.credit_score <= 760
+
+    try:
+        synthetic_soft_pull("123-45-6789")
+    except ValueError as error:
+        assert "SYN-###-##-####" in str(error)
+    else:
+        raise AssertionError("non-synthetic ID was accepted")

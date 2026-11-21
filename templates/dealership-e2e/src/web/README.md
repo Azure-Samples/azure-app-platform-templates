@@ -6,32 +6,21 @@ This is tier **① Surface** from the platform plan, implemented as a TypeScript
 ## What this scaffold includes
 
 - Chat interface for shopper prompts (streaming-friendly UI)
-- `/api/chat` route that auto-detects the real `deal-finder` agent, falling
-  back to a mock scenario generator for a fully standalone demo flow
+- `/api/chat` route that calls the live `deal-finder` agent (`AGENT_URL`) and
+  surfaces `source: "agent_error"` with startup guidance when the agent is
+  unreachable (zero runtime simulation)
 - Vehicle shortlist results grid
-- Deal status panel. Application submission and approval are not connected.
+- Deal status panel with visibly disabled customer email and `Apply (Unavailable)` controls (`Loan application submission workflow is not connected.`), backed by server-side `workflow_unavailable` defense-in-depth
 - `builder.yaml` manifest for Azure App Service Builder (`standalone` Next.js runtime and `/api/health` readiness check)
 
 ## Run locally
 
-```bash
-cd src/web
-npm install
-npm run dev
-```
-
-Open http://localhost:3000.
-
-In a Azure App Platform-created Dealer workspace, run the repository-level
-`scripts/dev-start.*` launcher and open the URL it prints instead. The
-launcher supplies the allocated `WEB_PORT` to Next.js and sets server-only
-`AGENT_URL` from the allocated `AGENT_PORT`; `3000` and `8088` remain the
-fallbacks for manual runs.
-
-> By default (`NEXT_PUBLIC_MOCK` unset) the app tries the real agent first
-> and falls back to mock responses if it's not reachable: see below. Set
-> `NEXT_PUBLIC_MOCK=1` to always mock, or `NEXT_PUBLIC_MOCK=0` to always
-> require the real agent (errors surface instead of falling back).
+In an Azure App Platform-created Dealer workspace, configure Azure AI Gateway
+and run the repository-level `./scripts/dev-start.sh` or `.\scripts\dev-start.ps1`
+launcher so Azurite, the four Hosted Skills, the `deal-finder` agent, and Next.js
+all start together. The launcher supplies the allocated `WEB_PORT` to Next.js
+and sets server-only `AGENT_URL` from the allocated `AGENT_PORT`; `3000` and
+`8088` remain the fallbacks for manual runs.
 
 ## Live mode: calling the real deal-finder agent
 
@@ -39,8 +28,7 @@ fallbacks for manual runs.
 server-side via `src/lib/agent-client.ts`: this must happen server-side (not
 from the browser) because the agent server sends no CORS headers.
 
-Since auto-detection is the default, no web app config is needed: just
-start the real agent alongside the web app:
+Start the real agent alongside the web app:
 
 ```bash
 # needs real AI Gateway credentials in src/agent/.env: see ../agent/README.md
@@ -51,7 +39,9 @@ uv run main.py
 Then `npm run dev` (in another terminal) and chat: replies come from the
 real model/agent. `AGENT_URL` in `.env.example` defaults to
 `http://127.0.0.1:8088`, matching the agent's default port; override it in
-`.env.local` if your agent runs elsewhere.
+`.env.local` if your agent runs elsewhere. When `AGENT_URL` is unreachable,
+`/api/chat` returns `source: "agent_error"` instructing you to start the full
+stack with `./scripts/dev-start.sh`.
 Live turns allow 120 seconds by default because they may include multiple
 Hosted Skills/model calls. Override the deadline with `AGENT_TIMEOUT_MS`.
 
@@ -65,10 +55,11 @@ Find me an EV under $40,000 with at least 250 miles of range
 ```
 
 Watch the badge in the top-right of the page header: it reflects the
-actual per-response `source` reported by `/api/chat`, not a guess from env
-vars: **"Live agent"** with an Octicon dot (green) means the reply came from the real
-agent, while **"Mock agent"** with an Octicon alert (amber) means the reply
-used sample data, either by configuration or fallback.
+actual per-response `source` reported by `/api/chat`: **"Live agent"** with an
+Octicon dot (green) means the reply came from the real agent, **"Live agent
+request failed"** with an Octicon `x-circle` (red) means the agent was
+unreachable or failed, and **"Approval unavailable"** means loan submission is
+not connected.
 
 Authored status and copy-feedback icons use the official
 `@primer/octicons-react` package. Message content is not rewritten. The car
@@ -93,8 +84,8 @@ npm run test:e2e:dev
 ```
 
 The first command tests a production build. The second tests the development
-server at `127.0.0.1`. Both use forced mock mode (`NEXT_PUBLIC_MOCK=1`), so
-they do not require the real agent. The production checks cover chat,
-shortlisting, unavailable application submission, reply-source badges, and
-conversation history. The development check also verifies that an untrusted
-origin cannot load development assets.
+server at `127.0.0.1`. UI rendering checks stub `/api/chat` inside `e2e/` via
+`page.route("**/api/chat", ...)`, while real `/api/chat` checks verify
+`agent_error` when `AGENT_URL` is unreachable and `workflow_unavailable` when
+`apply` is posted. The development check also verifies that an untrusted origin
+cannot load development assets.

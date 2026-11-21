@@ -1,9 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * E2E config for the driveline-web chat UI. Runs against `next start` in
- * forced mock mode (`NEXT_PUBLIC_MOCK=1`) so tests are deterministic and
- * never depend on the real deal-finder agent being up locally.
+ * E2E config for the driveline-web chat UI. Runs against a real `next start`
+ * build with no runtime mock mode (`AGENT_URL` points to an unused loopback
+ * port so the real `/api/chat` error-path test deterministically exercises
+ * `agent_error`, while UI rendering tests stub `/api/chat` in `e2e/`).
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -27,7 +28,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
-      NEXT_PUBLIC_MOCK: "1"
+      AGENT_URL: "http://127.0.0.1:59999"
     }
   }
 });

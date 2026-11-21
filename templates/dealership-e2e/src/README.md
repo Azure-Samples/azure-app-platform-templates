@@ -50,23 +50,16 @@ uv run python -m compileall src/agent src/skills
 ```
 
 **Web app and hosted agent are two separate, independent long-running
-processes: run each in its own terminal.** By default the web app
-**auto-detects** the real agent: it tries calling it first and transparently
-falls back to the built-in mock scenario generator if it's not reachable.
-So starting only the web app still gives a fully standalone mock demo:
+processes: run each in its own terminal (or run `./scripts/dev-start.sh` /
+`.\scripts\dev-start.ps1` from the template root to launch the full stack).**
+The web app has no runtime mock fallback: if `AGENT_URL` is unreachable, `/api/chat`
+returns `source: "agent_error"` with actionable startup guidance.
 
-For a Azure App Platform-created Dealer workspace, prefer `scripts/dev-start.sh` or
+For an Azure App Platform-created Dealer workspace, prefer `scripts/dev-start.sh` or
 `scripts/dev-start.ps1` from the repository root. Those launchers read the
 validated `.azure-app-platform/ports.env`, wire every component together, and print
 the selected URLs. The manual commands in this document use the fallback
 ports.
-
-```bash
-# Terminal: web app (no Azure required); works standalone via mock fallback
-cd src/web
-npm install
-npm run dev
-```
 
 ```bash
 # Optional: hosted agent offline one-shot rehearsal (no Azure required,
@@ -77,12 +70,8 @@ MOCK=1 uv run main.py
 
 ### Live mode: web app calling the real agent
 
-The web app **can** call the real deal-finder agent: the Next.js
-`/api/chat` route calls it server-side (avoiding CORS, since the agent
-server sends no `Access-Control-Allow-Origin` headers and a direct
-browser→agent `fetch()` would be blocked). Since auto-detection is the
-default, you only need to start the real agent: no web app config change
-required:
+The Next.js `/api/chat` route calls the deal-finder agent server-side (avoiding
+CORS, since the agent server sends no `Access-Control-Allow-Origin` headers):
 
 ```bash
 # Terminal 1: start the real agent (needs src/agent/.env from azd provision,
@@ -92,16 +81,15 @@ uv run main.py
 ```
 
 ```bash
-# Terminal 2: web app; auto-detects the agent above with no config
+# Terminal 2: web app; connects to AGENT_URL (http://127.0.0.1:8088 by default)
 cd src/web
 npm install
 npm run dev
 ```
 
 Open `http://localhost:3000` and chat: replies come from the real
-agent/model. If you stop the agent, the web app falls back to mock
-responses on the next request (a warning is logged server-side, no
-restart needed).
+agent/model. If the agent is stopped or unreachable, `/api/chat` returns
+`source: "agent_error"` with instructions to start `./scripts/dev-start.sh`.
 
 Once both terminals are running, use this prompt to verify the live agent
 path end-to-end: the chat panel shows it above the input with a **"Copy &
@@ -113,13 +101,10 @@ Find me an EV under $40,000 with at least 250 miles of range
 ```
 
 The badge reports the source of each response. **"Live agent"** means the
-reply came from the agent. **"Mock agent"** means the reply used sample data.
-**"Live agent request failed"** means the agent request failed; the chat
-shows the error. **"Approval unavailable"** means no application was sent.
-
-To force one mode instead of auto-detecting, set `NEXT_PUBLIC_MOCK` in
-`src/web/.env.local` (copy from `.env.example`): `1` always mocks,
-`0` always calls the agent and surfaces errors instead of falling back.
+reply came from the agent. **"Live agent request failed"** means the agent
+was unreachable or the request failed; the chat shows the error. **"Approval
+unavailable"** means no application was sent (and the UI keeps `Apply (Unavailable)`
+disabled while the loan-approval workflow is unwired).
 
 ### Start the Hosted Skills locally (required for real tool calls)
 

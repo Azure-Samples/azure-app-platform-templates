@@ -96,17 +96,21 @@ macOS/Linux:
 ./scripts/dev-stop.sh
 ```
 
-## 1. Web app (local, no Azure)
+## 1. Web UI & Playwright E2E checks (local, no Azure)
 
 ```shell
 cd src/web
 npm install
-npm run dev
+npm run test:e2e
+npm run test:e2e:dev
 ```
 
-Open the URL printed by Vite. Walk through the mock car-buying flow: enter buyer
-preferences, review matching vehicles, select a vehicle, inspect the quote, and
-continue through the financing handoff.
+`driveline-web` has no runtime mock agent: if you run `npm run dev` without the
+live `deal-finder` agent on `AGENT_URL`, `/api/chat` returns `source: "agent_error"`
+with instructions to start `./scripts/dev-start.sh`, and loan application
+controls remain visibly disabled (`Apply (Unavailable)`). Playwright UI
+rendering tests stub `/api/chat` inside `src/web/e2e/` while also testing the
+real `/api/chat` `agent_error` and `workflow_unavailable` paths directly.
 
 ## 2. Python checks (local, no Azure)
 

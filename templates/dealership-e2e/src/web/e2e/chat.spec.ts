@@ -1,17 +1,109 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-/**
- * End-to-end coverage for the driveline-web chat UI, run against
- * a production build in forced mock mode (see playwright.config.ts) so results are
- * deterministic and independent of the real deal-finder agent.
- *
- * The multi-turn test below is a regression test for the conversation-
- * memory bug: the web app previously only forwarded the latest message to
- * `/api/chat`, so the agent had no memory of prior turns. The fix sends the
- * full message history on every request; this test exercises that by
- * asserting the full transcript (both prior turns) is still present in the
- * DOM after a second turn.
- */
+// End-to-end coverage for the driveline-web chat UI against a real `next start`
+// build with zero runtime simulation:
+// - Unintercepted requests hit the real `/api/chat` route, which returns
+//   `source: "agent_error"` with startup guidance when `AGENT_URL` is
+//   unreachable.
+// - Pure UI rendering tests stub `/api/chat` strictly inside this E2E harness
+//   via `page.route("**/api/chat", ...)`.
+
+const TEST_VEHICLES = [
+  {
+    id: "ioniq-5-limited",
+    year: 2023,
+    make: "Hyundai",
+    model: "IONIQ 5 Limited AWD",
+    priceUsd: 37990,
+    rangeMiles: 303,
+    seats: 5
+  },
+  {
+    id: "mach-e-select",
+    year: 2022,
+    make: "Ford",
+    model: "Mustang Mach-E Select",
+    priceUsd: 36450,
+    rangeMiles: 312,
+    seats: 5
+  },
+  {
+    id: "tesla-model-3",
+    year: 2022,
+    make: "Tesla",
+    model: "Model 3 Long Range",
+    priceUsd: 37800,
+    rangeMiles: 333,
+    seats: 5
+  }
+];
+
+function ndjsonBody(events: Array<Record<string, unknown>>): string {
+  return events.map((event) => JSON.stringify(event)).join("\n") + "\n";
+}
+
+async function installUiChatHarness(page: Page, onRequestBody?: (body: unknown) => void) {
+  await page.route("**/api/chat", async (route) => {
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ content: string }>;
+    };
+    onRequestBody?.(body);
+    const latest = (body.messages?.at(-1)?.content ?? "").toLowerCase();
+
+    if (latest.includes("compare")) {
+      await route.fulfill({
+        contentType: "application/x-ndjson",
+        body: ndjsonBody([
+          { type: "source", value: "agent" },
+          {
+            type: "token",
+            value:
+              "Here's a quick comparison:\n\n" +
+              "| Model | Price | Range |\n" +
+              "| --- | --- | --- |\n" +
+              "| IONIQ 5 Limited AWD | $37,990 | 303 mi |\n" +
+              "| Mustang Mach-E Select | $36,450 | 312 mi |\n\n" +
+              "**IONIQ 5** has the most cargo room."
+          },
+          { type: "vehicles", value: TEST_VEHICLES },
+          { type: "status", value: "shortlisted" },
+          { type: "done" }
+        ])
+      });
+      return;
+    }
+
+    if (latest.includes("payment") || latest.includes("monthly")) {
+      await route.fulfill({
+        contentType: "application/x-ndjson",
+        body: ndjsonBody([
+          { type: "source", value: "agent" },
+          {
+            type: "token",
+            value: "Estimated payment: $589/month for 72 months at 6.4% APR with $2,500 down."
+          },
+          { type: "status", value: "shortlisted" },
+          { type: "done" }
+        ])
+      });
+      return;
+    }
+
+    await route.fulfill({
+      contentType: "application/x-ndjson",
+      body: ndjsonBody([
+        { type: "source", value: "agent" },
+        {
+          type: "token",
+          value: "I found three EVs under $38k with 250+ miles of range."
+        },
+        { type: "vehicles", value: TEST_VEHICLES },
+        { type: "status", value: "shortlisted" },
+        { type: "done" }
+      ])
+    });
+  });
+}
 
 test.describe("deal-finder chat", () => {
   test("renders the initial assistant greeting", async ({ page }) => {
@@ -23,7 +115,36 @@ test.describe("deal-finder chat", () => {
     await expect(page.getByText("Demo conversation")).toBeVisible();
   });
 
+  test("returns agent_error with startup guidance from real /api/chat when AGENT_URL is unreachable", async ({
+    page,
+    request
+  }) => {
+    const apiResponse = await request.post("/api/chat", {
+      data: {
+        messages: [{ id: "u1", role: "user", content: "Find me an EV" }]
+      }
+    });
+    expect(apiResponse.status()).toBe(200);
+    const rawLines = (await apiResponse.text()).trim().split("\n").map((line) => JSON.parse(line));
+    expect(rawLines[0]).toEqual({ type: "source", value: "agent_error" });
+    expect(rawLines[1]).toEqual({
+      type: "error",
+      value:
+        "Deal-finder agent is unavailable at http://127.0.0.1:59999. Start the full stack with ./scripts/dev-start.sh after configuring Azure AI Gateway."
+    });
+
+    await page.goto("/");
+    await page.getByTestId("chat-input").fill("Find me an EV");
+    await page.getByTestId("chat-send").click();
+
+    await expect(page.getByTestId("reply-source-badge")).toHaveText("Live agent request failed");
+    await expect(page.getByTestId("chat-message-assistant").last()).toContainText(
+      "Deal-finder agent is unavailable at http://127.0.0.1:59999. Start the full stack with ./scripts/dev-start.sh after configuring Azure AI Gateway."
+    );
+  });
+
   test("shortlists vehicles for a car-shopping prompt", async ({ page }) => {
+    await installUiChatHarness(page);
     await page.goto("/");
 
     await page.getByTestId("chat-input").fill(
@@ -35,33 +156,10 @@ test.describe("deal-finder chat", () => {
       "three EVs",
       { timeout: 10_000 }
     );
+    await expect(page.getByTestId("reply-source-badge")).toHaveText("Live agent");
 
     // Vehicle shortlist grid should render from the "vehicles" stream event.
     await expect(page.getByText("IONIQ 5")).toBeVisible();
-  });
-
-  test("shows a mock-agent badge when the mock scenario generator answers", async ({
-    page
-  }) => {
-    await page.goto("/");
-
-    await page.getByTestId("chat-input").fill(
-      "Find me an EV under $40,000 with at least 250 miles of range"
-    );
-    await page.getByTestId("chat-send").click();
-
-    await expect(page.getByTestId("chat-message-assistant").last()).toContainText(
-      "three EVs",
-      { timeout: 10_000 }
-    );
-
-    // NEXT_PUBLIC_MOCK=1 in this test run forces every reply through the
-    // mock scenario generator — the badge must say so plainly, never
-    // silently look like a live-agent reply.
-    await expect(page.getByTestId("reply-source-badge")).toHaveText("Mock agent");
-    const icon = page.getByTestId("reply-source-badge").locator("svg.octicon-alert");
-    await expect(icon).toBeVisible();
-    await expect(icon).toHaveAttribute("aria-hidden", "true");
   });
 
   test("uses an accessible Octicon for starter-prompt confirmation", async ({ page }) => {
@@ -77,26 +175,29 @@ test.describe("deal-finder chat", () => {
   for (const [source, icon, label] of [
     ["agent", "dot-fill", "Live agent"],
     ["agent_error", "x-circle", "Live agent request failed"],
+    ["workflow_unavailable", "x-circle", "Approval unavailable"]
   ] as const) {
     test(`uses the official ${icon} icon for ${source} replies`, async ({ page }) => {
-      await page.route("**/api/chat", (route) => route.fulfill({
-        contentType: "application/x-ndjson",
-        body: [
-          { type: "source", value: source },
-          source === "agent_error"
-            ? { type: "error", value: "Could not reach the live agent." }
-            : { type: "token", value: "A test response." },
-          { type: "done" },
-        ].map((event) => JSON.stringify(event)).join("\n") + "\n",
-      }));
+      await page.route("**/api/chat", (route) =>
+        route.fulfill({
+          contentType: "application/x-ndjson",
+          body: ndjsonBody([
+            { type: "source", value: source },
+            source === "agent"
+              ? { type: "token", value: "A test response." }
+              : { type: "error", value: "Action or agent unavailable." },
+            { type: "done" }
+          ])
+        })
+      );
       await page.goto("/");
       await page.getByTestId("chat-input").fill("Test status");
       await page.getByTestId("chat-send").click();
       const badge = page.getByTestId("reply-source-badge");
       await expect(badge).toContainText(label);
-      if (source === "agent_error") {
+      if (source !== "agent") {
         await expect(page.getByTestId("chat-message-assistant").last()).toContainText(
-          "Could not reach the live agent."
+          "Action or agent unavailable."
         );
       }
       await expect(badge.locator(`svg.octicon-${icon}`)).toBeVisible();
@@ -105,6 +206,7 @@ test.describe("deal-finder chat", () => {
   }
 
   test("keeps the conversation running across multiple turns", async ({ page }) => {
+    await installUiChatHarness(page);
     await page.goto("/");
 
     await page.getByTestId("chat-input").fill(
@@ -116,9 +218,6 @@ test.describe("deal-finder chat", () => {
       { timeout: 10_000 }
     );
 
-    // Second turn: ask about payment — a distinct mock-agent intent, not a
-    // repeat of turn one. A correct reply here proves /api/chat processed
-    // this turn's request correctly.
     await page.getByTestId("chat-input").fill("what would the monthly payment be?");
     await page.getByTestId("chat-send").click();
 
@@ -127,29 +226,15 @@ test.describe("deal-finder chat", () => {
       { timeout: 10_000 }
     );
 
-    // Both prior turns must still be present in the transcript — this is
-    // what a client that discards history (the pre-fix bug) would still
-    // render correctly client-side, but which /api/chat would fail to
-    // receive server-side. Combined with the network assertion below,
-    // this confirms the whole path works end-to-end.
     const userMessages = page.getByTestId("chat-message-user");
     await expect(userMessages).toHaveCount(2);
     await expect(userMessages.first()).toContainText("under $40,000");
     await expect(userMessages.last()).toContainText("monthly payment");
   });
 
-  test("sends the full message history to /api/chat on every turn", async ({
-    page
-  }) => {
-    // Regression test for the exact bug: assert the request body's
-    // `messages` array grows to include every prior turn, not just the
-    // latest one.
+  test("sends the full message history to /api/chat on every turn", async ({ page }) => {
     const requestBodies: unknown[] = [];
-    await page.route("**/api/chat", async (route) => {
-      const request = route.request();
-      requestBodies.push(request.postDataJSON());
-      await route.continue();
-    });
+    await installUiChatHarness(page, (body) => requestBodies.push(body));
 
     await page.goto("/");
 
@@ -166,22 +251,17 @@ test.describe("deal-finder chat", () => {
     const firstRequest = requestBodies[0] as { messages: Array<{ content: string }> };
     const secondRequest = requestBodies[1] as { messages: Array<{ content: string }> };
 
-    // First request: greeting + the user's first message.
     expect(firstRequest.messages.map((m) => m.content)).toEqual(
       expect.arrayContaining(["first message"])
     );
 
-    // Second request must include BOTH prior user turns, not just the
-    // latest — this is the assertion that would have failed before the fix.
     const secondContents = secondRequest.messages.map((m) => m.content);
     expect(secondContents).toEqual(expect.arrayContaining(["first message", "second message"]));
     expect(secondRequest.messages.length).toBeGreaterThan(firstRequest.messages.length);
   });
 
   test("renders markdown replies as formatted HTML, not raw syntax", async ({ page }) => {
-    // Regression test for the raw-markdown-text bug: assistant replies with
-    // GFM markdown (tables, bold) must render as real HTML elements, not
-    // literal "**"/"|" characters in the DOM text.
+    await installUiChatHarness(page);
     await page.goto("/");
 
     await page.getByTestId("chat-input").fill("compare the top two EVs side by side");
@@ -190,64 +270,47 @@ test.describe("deal-finder chat", () => {
     const lastAssistantMessage = page.getByTestId("chat-message-assistant").last();
     await expect(lastAssistantMessage).toContainText("IONIQ 5", { timeout: 10_000 });
 
-    // A real <table> with parsed cells must exist inside the bubble...
     await expect(lastAssistantMessage.locator("table")).toBeVisible();
     await expect(lastAssistantMessage.locator("td", { hasText: "$37,990" })).toBeVisible();
-    // ...and "IONIQ 5" must be bolded via <strong>, not just present as text.
     await expect(lastAssistantMessage.locator("strong", { hasText: "IONIQ 5" })).toBeVisible();
 
-    // The raw markdown syntax itself must not leak into the rendered text.
     const bubbleText = await lastAssistantMessage.innerText();
     expect(bubbleText).not.toContain("**");
     expect(bubbleText).not.toContain("| ---");
   });
 
-  test("does not claim an application was submitted or approved without a workflow", async ({
-    page
+  test("keeps loan application controls visibly unavailable and enforces workflow_unavailable on the server", async ({
+    page,
+    request
   }) => {
     await page.goto("/");
 
-    let releaseReply!: () => void;
-    const replyHeld = new Promise<void>((resolve) => { releaseReply = resolve; });
-    await page.route("**/api/chat", async (route) => {
-      if (!route.request().postDataJSON().command) {
-        await replyHeld;
-      }
-      await route.continue();
-    });
-    await page.getByTestId("chat-input").fill("hello");
-    await Promise.all([
-      page.waitForRequest((request) => request.url().endsWith("/api/chat")),
-      page.getByTestId("chat-send").click()
-    ]);
-    await page.getByLabel("Customer email").fill("paul@example.com");
-    const applyButton = page.getByRole("button", { name: "Apply" });
-    try {
-      await expect(applyButton).toBeDisabled();
-    } finally {
-      releaseReply();
-    }
-    await expect(page.getByTestId("chat-message-assistant").last()).toContainText(
-      "Application submission is not connected.",
-      { timeout: 10_000 }
-    );
+    await expect(
+      page.getByText("Loan application submission workflow is not connected.")
+    ).toBeVisible();
 
-    await expect(applyButton).toBeEnabled();
-    await page.clock.install();
-    const [response] = await Promise.all([
-      page.waitForResponse((response) =>
-        response.url().endsWith("/api/chat") && response.request().postDataJSON().command === "apply"
-      ),
-      applyButton.click()
-    ]);
-    expect(response.status()).toBe(200);
-    await expect(page.getByTestId("chat-message-assistant").last()).toContainText(
-      "Application submission is not connected. No application was sent.",
-      { timeout: 10_000 }
-    );
-    await expect(page.getByTestId("reply-source-badge")).toHaveText("Approval unavailable");
-    await expect(applyButton).toBeEnabled();
-    await page.clock.fastForward(8_000);
+    const emailInput = page.getByLabel("Customer email");
+    await expect(emailInput).toBeDisabled();
+    await expect(emailInput).toHaveAttribute("aria-disabled", "true");
+
+    const applyButton = page.getByRole("button", { name: "Apply (Unavailable)" });
+    await expect(applyButton).toBeVisible();
+    await expect(applyButton).toBeDisabled();
+    await expect(applyButton).toHaveAttribute("aria-disabled", "true");
     await expect(page.locator("li[aria-current='step']")).toHaveCount(0);
+
+    for (const payload of [
+      { messages: [{ id: "1", role: "user", content: "Apply" }], action: "apply" },
+      { messages: [{ id: "1", role: "user", content: "Apply" }], command: "apply" }
+    ]) {
+      const response = await request.post("/api/chat", { data: payload });
+      expect(response.status()).toBe(200);
+      const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+      expect(events[0]).toEqual({ type: "source", value: "workflow_unavailable" });
+      expect(events[1]).toEqual({
+        type: "error",
+        value: "Application submission is not connected. No application was sent."
+      });
+    }
   });
 });
