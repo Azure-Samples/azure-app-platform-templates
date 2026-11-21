@@ -52,6 +52,55 @@ process_matches() {
   [[ -n "$current" && "$current" == "$2" ]]
 }
 
+process_pgid() {
+  "$PS_COMMAND" -o pgid= -p "$1" 2>/dev/null | tr -d '[:space:]'
+}
+
+pgroup_live_pids() {
+  "$PS_COMMAND" -axo pid=,pgid=,state= 2>/dev/null |
+    awk -v g="$1" '$2 == g && $3 !~ /^Z/ { print $1 }'
+}
+
+kill_process_group() {
+  local pgid="$1" members="" member=""
+  members="$(pgroup_live_pids "$pgid")"
+  while read -r member; do
+    [[ "$member" =~ ^[0-9]+$ ]] || continue
+    if is_protected_pid "$member"; then
+      echo "Refusing to stop protected process-group member PID $member." >&2
+      return 1
+    fi
+  done <<<"$members"
+
+  "$KILL_COMMAND" -TERM -- -"$pgid" 2>/dev/null ||
+    "$KILL_COMMAND" -TERM -"$pgid" 2>/dev/null ||
+    "$KILL_COMMAND" -TERM "$pgid" 2>/dev/null || true
+
+  for _ in {1..25}; do
+    if [[ -z "$(pgroup_live_pids "$pgid")" ]]; then
+      return 0
+    fi
+    "$KILL_COMMAND" -TERM -- -"$pgid" 2>/dev/null ||
+      "$KILL_COMMAND" -TERM -"$pgid" 2>/dev/null || true
+    "$SLEEP_COMMAND" 0.1
+  done
+
+  if [[ -n "$(pgroup_live_pids "$pgid")" ]]; then
+    "$KILL_COMMAND" -KILL -- -"$pgid" 2>/dev/null ||
+      "$KILL_COMMAND" -9 -"$pgid" 2>/dev/null ||
+      "$KILL_COMMAND" -KILL "$pgid" 2>/dev/null || true
+  fi
+
+  for _ in {1..10}; do
+    if [[ -z "$(pgroup_live_pids "$pgid")" ]]; then
+      return 0
+    fi
+    "$SLEEP_COMMAND" 0.1
+  done
+
+  [[ -z "$(pgroup_live_pids "$pgid")" ]]
+}
+
 collect_descendants() {
   local parent="$1" child="" child_start="" children=""
   children="$("$PGREP_COMMAND" -P "$parent" 2>/dev/null || true)"
@@ -85,8 +134,15 @@ any_tree_alive() {
 }
 
 kill_tree() {
-  local pid="$1" expected_start="$2" entry_pid="" entry_start=""
+  local pid="$1" expected_start="$2" caller_pgid="" target_pgid="" entry_pid="" entry_start=""
   process_matches "$pid" "$expected_start" || return 0
+
+  caller_pgid="$(process_pgid "$$")"
+  target_pgid="$(process_pgid "$pid")"
+  if [[ -n "$target_pgid" && "$target_pgid" == "$pid" && "$target_pgid" != "$caller_pgid" ]]; then
+    kill_process_group "$pid"
+    return $?
+  fi
 
   TREE_SEEN_PIDS=" $pid "
   TREE_ENTRIES="${pid}"$'\t'"${expected_start}"$'\n'

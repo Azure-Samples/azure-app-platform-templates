@@ -240,6 +240,9 @@ printf 'SKILL_TEXT_INSIGHTS_PORT=%s\n' "$mcp_port" >"$app/.azure-app-platform/po
     --port "$resolved" \
     --run-dir "$app/.dev-run"
   [[ -f "$app/src/skills/text-insights/local.settings.json" ]]
+  recorded_skill_pid="$(awk -F '\t' '$1 == "text-insights" { print $3 }' "$app/.dev-run/processes.posix.tsv")"
+  recorded_skill_pgid="$(ps -o pgid= -p "$recorded_skill_pid" | tr -d '[:space:]')"
+  [[ "$recorded_skill_pgid" == "$recorded_skill_pid" ]]
   "$app/scripts/lifecycle/mcp-skill-stop.sh" --run-dir "$app/.dev-run"
   [[ ! -f "$app/.dev-run/processes.posix.tsv" ]]
 )
@@ -298,6 +301,51 @@ while read -r wpid; do
   fi
 done <"$app/workers.pids"
 echo "mcp-skill-stop: supervisor-first shutdown prevents worker respawn and orphans"
+
+app="$test_root/mcp-setsid-trap-reparent"
+mkdir -p "$app/.dev-run"
+python3 -c '
+import os, signal, subprocess, sys, time
+
+os.setsid()
+ready_file, trap_child_file = sys.argv[1], sys.argv[2]
+
+def on_term(_signum, _frame):
+    # Simulate func spawning a replacement worker inside SIGTERM right before exiting,
+    # immediately reparenting that child to PPID 1 while sharing PGID == supervisor PID.
+    child_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    with open(trap_child_file, "w", encoding="utf-8") as handle:
+        handle.write(f"{child_proc.pid}\n")
+    os._exit(0)
+
+signal.signal(signal.SIGTERM, on_term)
+with open(ready_file, "w", encoding="utf-8") as handle:
+    handle.write(f"{os.getpid()}:{os.getpgid(0)}\n")
+while True:
+    time.sleep(0.2)
+' "$app/supervisor.ready" "$app/trap-child.pid" &
+child=$!
+for _ in {1..40}; do
+  [[ -s "$app/supervisor.ready" ]] && break
+  sleep 0.05
+done
+[[ "$(cat "$app/supervisor.ready")" == "$child:$child" ]]
+supervisor_pgid="$child"
+started_at="$(ps -p "$child" -o lstart= | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+printf 'text-insights\t7071\t%s\t%s\n' "$child" "$started_at" >"$app/.dev-run/processes.posix.tsv"
+"$root/templates/shared/lifecycle/mcp-skill-stop.sh" --run-dir "$app/.dev-run"
+wait "$child" 2>/dev/null || true
+child=""
+[[ ! -f "$app/.dev-run/processes.posix.tsv" ]]
+[[ -s "$app/trap-child.pid" ]]
+trap_child_pid="$(cat "$app/trap-child.pid")"
+if kill -0 "$trap_child_pid" 2>/dev/null; then
+  kill -9 "$trap_child_pid" 2>/dev/null || true
+  echo "Reparented SIGTERM-trap child PID $trap_child_pid survived mcp-skill-stop.sh" >&2
+  exit 1
+fi
+[[ -z "$(ps -axo pid=,pgid=,state= | awk -v g="$supervisor_pgid" '$2 == g && $3 !~ /^Z/ { print $1 }')" ]]
+echo "mcp-skill-stop: setsid process-group teardown kills SIGTERM-spawned PPID-1 child with 0 survivors"
 
 for name in dealership-e2e shared/dealer; do
   app="$test_root/${name//\//-}-skill-order"

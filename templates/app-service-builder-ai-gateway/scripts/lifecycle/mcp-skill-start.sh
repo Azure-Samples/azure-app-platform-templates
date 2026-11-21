@@ -136,6 +136,18 @@ remove_pid_record() {
   mv "$tmp_file" "$STATE_FILE"
 }
 
+exec_in_new_session() {
+  if command -v python3 >/dev/null 2>&1; then
+    exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+  elif command -v python >/dev/null 2>&1; then
+    exec python -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    exec perl -MPOSIX -e 'POSIX::setsid() != -1 or die $!; exec @ARGV or die $!' -- "$@"
+  else
+    exec "$@"
+  fi
+}
+
 for attempt in 1 2; do
   stdout_log="$RUN_DIR/$SKILL_NAME.log"
   stderr_log="$RUN_DIR/$SKILL_NAME.err.log"
@@ -143,9 +155,9 @@ for attempt in 1 2; do
     cd "$SKILL_PATH"
     unset VIRTUAL_ENV
     if [[ -f "$SKILL_PATH/pyproject.toml" ]]; then
-      exec uv run func start --port "$SKILL_PORT"
+      exec_in_new_session uv run func start --port "$SKILL_PORT"
     else
-      exec uv run --with-requirements requirements.txt func start --port "$SKILL_PORT"
+      exec_in_new_session uv run --with-requirements requirements.txt func start --port "$SKILL_PORT"
     fi
   ) >"$stdout_log" 2>"$stderr_log" &
   skill_pid=$!
