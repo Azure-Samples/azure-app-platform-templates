@@ -298,7 +298,7 @@ if [ -n "$aca_sandbox_group" ]; then
   resolved_aca_sub="${aca_subscription:-$subscription_id}"
   export PATH="$HOME/.local/bin:$HOME/.aca/bin:$PATH"
   if ! command -v aca >/dev/null 2>&1; then
-    echo "ACA CLI ('aca') is not installed. Install ACA CLI in Prerequisites or choose Local simulation mode." >&2
+    echo "ACA CLI ('aca') is not installed. Install ACA CLI in Prerequisites or configure DOCUMENT_TOOL_SESSION_POOL_ENDPOINT before running sandboxed document validation." >&2
     exit 1
   fi
   echo "Validating ACA Sandbox Group '${aca_sandbox_group}' (create and delete permissions)..."

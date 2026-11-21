@@ -135,11 +135,6 @@ with `lstat`, including symlinks, without listing directories or reading file
 contents. Permission or inspection errors fail explicitly rather than
 producing a zero count.
 
-The local development harness passes only its small environment allowlist
-(`PATH`, Python encoding settings, and available locale/Windows runtime
-settings). A local child still shares the host filesystem. Its credential
-location observations describe that host-side process, not a microVM.
-
 ### Exercise outbound denial without exfiltrating data
 
 The tool turns the selected URL into a credential-free, origin-only `HEAD`.
@@ -152,10 +147,10 @@ live ACA check. A fictional `.example` host can fail DNS without reaching the
 proxy. DNS, TLS, timeout, connection failures, and HTTP 403 alone are recorded
 as unverified. A matching ACA audit denial supplies the network-policy evidence.
 
-The local development fallback attempts the same request under a Python
-socket/DNS audit hook and reports `python-audit-hook` when denied. That is a
-process-local check. Use ACA for isolation from arbitrary native code, child
-executables, and host files.
+There is no local subprocess simulation or Python audit-hook fallback: when
+neither `ACA_SANDBOX_GROUP` nor `DOCUMENT_TOOL_SESSION_POOL_ENDPOINT` is
+configured, `POST /test-document` and document-bearing `POST /invoke` return
+HTTP 503 (`sandbox-not-configured`).
 
 ### Read the diagnostics and execution view
 
@@ -231,8 +226,7 @@ The tool's HTTP 200 can contain a rejected verdict; the harness returns HTTP
 422 for that policy halt. GET readiness probes stay quiet. HTTP logs contain
 only known routes, status, verdict, reason code, and duration. Query strings,
 unknown paths, request/response text, headers, and credential values are not
-logged. `LocalDocumentTool` emits no invocation logs and does not replay its
-captured child diagnostics; local HTTP requests still get the one outcome line.
+logged.
 
 These are illustrative records, not evidence from a particular deployment.
 The environment line shows what the process observed; the ACA line shows
@@ -297,9 +291,9 @@ Custom sandbox projects expose their own `main.py`, `contract.json`, and
 | `src/tools/document-validation/main.py` | `_credential_locations()` and `_probe_sandbox()`: real key/path observations and the HEAD attempt. |
 | `src/policy/enforcement.py` | `probe_origin()` strips payload-bearing URL components; `log_sandbox_probe()`, `runtime_log_outcome()`, and `log_http_outcome()` emit bounded observations and outcome fields only. |
 | `src/tools/document-validation/contract.json` | Bounded probe fields and sanitized ACA decision schema. |
-| `src/agent/main.py` | `AcaSessionClient`, `Handler`, `_tool_process_environment()`, `_validate_sandbox_probe()`, and `AcaSandboxGroupDocumentTool`: session cleanup outcomes, timed HTTP outcomes, launch inputs, validation, apply/exec/audit/delete ordering, and denial correlation. |
+| `src/agent/main.py` | `AcaSessionClient`, `Handler`, `_validate_sandbox_probe()`, and `AcaSandboxGroupDocumentTool`: fail-closed `503 sandbox-not-configured` check, session cleanup outcomes, timed HTTP outcomes, validation, apply/exec/audit/delete ordering, and denial correlation. |
 | `src/tools/document-validation/tests/test_main.py` | Live names/counts, five real fixture locations, explicit inspection errors, log redaction, and origin-only requests. |
-| `src/agent/tests/test_runtime.py` | A real local listener receives no request; host credential values stay out; stubbed ACA decisions test lifecycle, correlation, and redaction. |
+| `src/agent/tests/test_runtime.py` | Explicit `503 sandbox-not-configured` verification when unconfigured; stubbed ACA CLI and session-pool tests for lifecycle, correlation, and redaction. |
 | `canvases/azure-app-platform/sandbox-boundary-test.mjs` | Staging for starter documents, custom documents, and prompt/code-only apps. |
 | `canvases/azure-app-platform/blocked-agent-response.mjs` | Normalization of bounded names, counts, and ACA summaries; rejection of malformed evidence. |
 | `canvases/azure-app-platform/run-execution.mjs` | Execution metadata and code pointers. |
