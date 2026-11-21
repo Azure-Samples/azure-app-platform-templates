@@ -419,10 +419,32 @@ if (-not $SkipSkills) {
             throw "[$name] could not update local.settings.json for the selected Azurite ports: $($_.Exception.Message)"
         }
 
-        # Run from the skill directory and let its pyproject.toml drive venv
-        # creation and dependency sync. On Windows, uv must be given the npm
-        # command shim explicitly; it does not resolve `func` to `func.cmd`.
-        $funcCommand = if ($env:OS -eq 'Windows_NT') { 'func.cmd' } else { 'func' }
+        function Resolve-DealerFuncCommand {
+            $userFunc = Join-Path $HOME '.azure-functions\func.exe'
+            if (Test-Path -LiteralPath $userFunc) { return $userFunc }
+            foreach ($candidateName in @('func.cmd', 'func.exe', 'func')) {
+                $cmd = Get-Command $candidateName -All -ErrorAction SilentlyContinue
+                foreach ($entry in @($cmd)) {
+                    if (-not $entry -or -not $entry.Source) { continue }
+                    $src = [string]$entry.Source
+                    if ($src -like '*\Azure Functions Core Tools\func.exe') {
+                        $kvDll = Join-Path (Split-Path -Parent $src) 'Azure.Security.KeyVault.Secrets.dll'
+                        if (-not (Test-Path -LiteralPath $kvDll)) { continue }
+                    }
+                    return $src
+                }
+            }
+            return $null
+        }
+        $funcCommand = if ($env:OS -eq 'Windows_NT') { Resolve-DealerFuncCommand } else { 'func' }
+        if (-not $funcCommand) {
+            & (Join-Path $DealerScriptRoot 'dev-stop.ps1')
+            throw "[$name] Azure Functions Core Tools ('func') is required to start Dealership Hosted Skills. Install Azure Functions Core Tools v4 and retry."
+        }
+        $funcVer = (& $funcCommand --version 2>$null | Out-String).Trim()
+        $extraFuncFlags = if ($funcVer.StartsWith('5.')) { @('--no-tui', '--no-azurite', '--offline') } else { @() }
+        $reqPath = Join-Path $skillDir 'requirements.txt'
+        $reqStashPath = Join-Path $skillDir '.requirements.azd.bak'
         $originalTemp = $env:TEMP
         $originalTmp = $env:TMP
         for ($attempt = 1; $attempt -le 2; $attempt++) {
@@ -434,14 +456,23 @@ if (-not $SkipSkills) {
                     $env:TEMP = $skillTemp
                     $env:TMP = $skillTemp
                 }
+                if ($funcVer.StartsWith('5.') -and (Test-Path -LiteralPath (Join-Path $skillDir 'pyproject.toml')) -and (Test-Path -LiteralPath $reqPath)) {
+                    Move-Item -Force -LiteralPath $reqPath -Destination $reqStashPath
+                }
                 $skillProcess = Start-Tracked -Name $name -WorkingDirectory $skillDir -FilePath 'uv' `
-                    -ArgumentList @('run', $funcCommand, 'start', '--port', "$port") -Port $port
+                    -ArgumentList (@('run', $funcCommand, 'start', '--port', "$port") + $extraFuncFlags) -Port $port
             } finally {
                 $env:TEMP = $originalTemp
                 $env:TMP = $originalTmp
             }
             if (Wait-PortListening -Name $name -Port $port) {
+                if ((Test-Path -LiteralPath $reqStashPath) -and -not (Test-Path -LiteralPath $reqPath)) {
+                    Move-Item -Force -LiteralPath $reqStashPath -Destination $reqPath
+                }
                 break
+            }
+            if ((Test-Path -LiteralPath $reqStashPath) -and -not (Test-Path -LiteralPath $reqPath)) {
+                Move-Item -Force -LiteralPath $reqStashPath -Destination $reqPath
             }
             if (
                 $attempt -eq 1 -and -not (Test-TrackedProcess -Entry $skillProcess) -and

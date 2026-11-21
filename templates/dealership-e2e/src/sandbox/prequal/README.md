@@ -12,10 +12,11 @@ synthetic credit band, estimated APR/payment, term, and generic reasons: never
 the input. Payloads must not be logged or placed in prompts, telemetry, or a
 database.
 
-`lender_stub.py` is the mocked “credit-bureau soft pull.” It is deterministic,
-canned, and performs no network I/O. Production keeps the real sandbox
-lifecycle and deny-all egress posture, allowing only a separately hosted lender
-stub as documented in [egress-policy.md](egress-policy.md).
+`synthetic_credit_fixtures.py` supplies deterministic synthetic credit profile
+fixtures (`SYN-###-##-####`) with no network I/O; it is synthetic sample data,
+not a simulated live lender service. Production keeps the real sandbox
+lifecycle and deny-all egress posture, allowing only an explicitly reviewed
+external credit/lender endpoint as documented in [egress-policy.md](egress-policy.md).
 
 Run locally with synthetic data:
 

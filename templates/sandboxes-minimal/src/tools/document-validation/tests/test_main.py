@@ -112,7 +112,9 @@ class DocumentToolTests(unittest.TestCase):
             )
 
     def test_credentials_are_not_a_hardcoded_startup_gate(self):
-        with patch.dict(os.environ, {"AI_GATEWAY_API_KEY": "fixture-value"}, clear=True):
+        with patch.dict(os.environ, {"AI_GATEWAY_API_KEY": "fixture-value"}, clear=True), patch.object(
+            tool.Path, "home", return_value=Path("/home/sandbox")
+        ), patch.object(tool.Path, "lstat", side_effect=FileNotFoundError), redirect_stderr(io.StringIO()):
             result = tool.process_document({
                 "operation": "sanitize-v1",
                 "document": {"name": "setup.md", "content": "The host configures GITHUB_TOKEN."},
@@ -121,14 +123,20 @@ class DocumentToolTests(unittest.TestCase):
         self.assertNotIn("fixture-value", str(result))
         self.assertFalse(hasattr(tool, "FORBIDDEN_CREDENTIAL_ENV"))
 
-    def test_probe_inspects_live_environment_and_exercises_network_policy(self):
+    def test_probe_inspects_live_environment_and_reports_origin_only_attempt(self):
+        self.assertFalse(hasattr(tool, "LocalNetworkDenied"))
+        self.assertFalse(hasattr(tool, "_install_local_network_policy"))
+        with self.assertRaises(SystemExit):
+            with redirect_stderr(io.StringIO()):
+                tool.main(["--deny-network"])
+
         with patch.dict(os.environ, {
             "CUSTOM_ACCESS_TOKEN": "fixture-token",
             "CUSTOM_API_KEY": "fixture-key",
             "IDENTITY_ENDPOINT": "http://identity.invalid",
             "PATH": "/bin",
-        }, clear=True), patch.object(tool.Path, "lstat", side_effect=FileNotFoundError), patch.object(tool.request, "build_opener") as build, redirect_stderr(io.StringIO()) as logs:
-            build.return_value.open.side_effect = tool.error.URLError(tool.LocalNetworkDenied("denied"))
+        }, clear=True), patch.object(tool.Path, "home", return_value=Path("/home/sandbox")), patch.object(tool.Path, "lstat", side_effect=FileNotFoundError), patch.object(tool.request, "build_opener") as build, redirect_stderr(io.StringIO()) as logs:
+            build.return_value.open.side_effect = tool.error.URLError("network unreachable")
             result = tool.process_document({
                 "operation": "sanitize-v1",
                 "document": {
@@ -145,8 +153,8 @@ class DocumentToolTests(unittest.TestCase):
             "credentialLikeVariableCount": 3,
             "credentialValuesReturned": False,
             "outboundAttempted": True,
-            "outboundOutcome": "denied",
-            "enforcement": "python-audit-hook",
+            "outboundOutcome": "transport-error",
+            "enforcement": "unverified",
             "httpStatus": None,
         })
         outgoing = build.return_value.open.call_args.args[0]
@@ -159,13 +167,13 @@ class DocumentToolTests(unittest.TestCase):
             self.assertNotIn(value, logs.getvalue())
         self.assertIn('[sandbox-env] env_keys=["CUSTOM_ACCESS_TOKEN","CUSTOM_API_KEY","IDENTITY_ENDPOINT","PATH"]', logs.getvalue())
         self.assertIn("credential_like_vars=3 secret_files=0 values_returned=false", logs.getvalue())
-        self.assertIn('[sandbox-net] probe="HEAD https://collector.example/" outcome=denied enforcement=python-audit-hook http_status=None', logs.getvalue())
+        self.assertIn('[sandbox-net] probe="HEAD https://collector.example/" outcome=transport-error enforcement=unverified http_status=None', logs.getvalue())
 
     def test_environment_names_are_bounded_without_hiding_total_or_credential_count(self):
         environment = {f"KEY_{index:02}": "not-returned" for index in range(40)}
         environment["ZZ_ACCESS_TOKEN"] = "not-returned-either"
-        with patch.dict(os.environ, environment, clear=True), patch.object(tool.Path, "lstat", side_effect=FileNotFoundError), patch.object(tool.request, "build_opener") as build, redirect_stderr(io.StringIO()) as logs:
-            build.return_value.open.side_effect = tool.LocalNetworkDenied("denied")
+        with patch.dict(os.environ, environment, clear=True), patch.object(tool.Path, "home", return_value=Path("/home/sandbox")), patch.object(tool.Path, "lstat", side_effect=FileNotFoundError), patch.object(tool.request, "build_opener") as build, redirect_stderr(io.StringIO()) as logs:
+            build.return_value.open.side_effect = tool.error.URLError("unreachable")
             probe = tool._probe_sandbox("https://collector.example/private?not-returned")
         self.assertEqual(probe["envKeys"], sorted(environment)[:32])
         self.assertEqual(probe["envKeyCount"], 41)
@@ -186,7 +194,7 @@ class DocumentToolTests(unittest.TestCase):
                 location.parent.mkdir(parents=True, exist_ok=True)
                 location.write_text("fixture-secret-never-read", encoding="utf-8")
             with patch.object(tool, "_credential_locations", return_value=checked), patch.object(tool.request, "build_opener") as build, redirect_stderr(io.StringIO()) as logs:
-                build.return_value.open.side_effect = tool.LocalNetworkDenied("denied")
+                build.return_value.open.side_effect = tool.error.URLError("unreachable")
                 probe = tool._probe_sandbox("https://collector.example/")
             self.assertTrue(probe["secretFilesPresent"])
             self.assertEqual(probe["secretFileCount"], 5)
@@ -210,7 +218,7 @@ class DocumentToolTests(unittest.TestCase):
         failures = [
             tool.error.URLError("DNS failure"),
             tool.error.URLError(TimeoutError()),
-            tool.error.HTTPError("https://collector.example/", 403, "Forbidden", {}, None),
+            tool.error.HTTPError("https://collector.example/", 403, "Forbidden", {}, io.BytesIO(b"")),
         ]
         for failure in failures:
             with self.subTest(failure=type(failure).__name__), patch.object(tool.request, "build_opener") as build:

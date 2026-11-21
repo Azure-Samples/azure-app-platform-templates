@@ -27,16 +27,11 @@ export interface ChatApiRequest {
   messages: ChatMessage[];
   email?: string;
   command?: "apply";
+  action?: "apply";
   stage?: DealStage;
 }
 
-export interface MockScenario {
-  assistantReply: string;
-  vehicles?: Vehicle[];
-  stage?: DealStage;
-}
-
-export type ReplySource = "agent" | "mock" | "agent_error" | "workflow_unavailable";
+export type ReplySource = "agent" | "agent_error" | "workflow_unavailable";
 
 export type ChatStreamEvent =
   | { type: "token"; value: string }

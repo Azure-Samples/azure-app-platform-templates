@@ -109,6 +109,10 @@ class HttpFailure(RuntimeError):
         self.blocked_response = blocked_response
 
 
+SANDBOX_NOT_CONFIGURED_MESSAGE = (
+    "ACA Sandbox is not configured. Configure ACA_SANDBOX_GROUP (with the 'aca' CLI) "
+    "or DOCUMENT_TOOL_SESSION_POOL_ENDPOINT to run sandboxed document validation."
+)
 BLOCKED_RESPONSE_CONTRACT_VERSION = "agent-blocked-response/1.0"
 
 
@@ -124,19 +128,23 @@ def _blocked_agent_response(
     sandbox_probe: dict[str, Any] | None = None,
     gateway_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    document_not_applicable = any(
+        stage.get("id") == "document-tool" and stage.get("state") == "not-applicable"
+        for stage in stages
+    )
     if runtime["agentRuntime"] == AGENT_RUNTIME_COPILOT_SANDBOX:
         mode = "aca-session"
-    elif runtime["documentToolRuntime"] == "aca-custom-container-session":
+    elif runtime["documentToolRuntime"] == "aca-custom-container-session" and not document_not_applicable:
         mode = "aca-document-session"
+    elif test_kind == "document-input":
+        mode = "aca-document-session"
+    elif test_kind == "gateway-policy":
+        mode = "gateway-policy"
     else:
-        mode = "local-simulation"
+        mode = "local-agent"
     limitations = [
         "no-model-call" if test_kind == "document-input" else "model-output-not-shown",
-        (
-            "local-process-not-isolation-boundary"
-            if mode == "local-simulation"
-            else "cloud-isolation-not-verified"
-        ),
+        "cloud-isolation-not-verified",
     ]
     if sandbox_probe is None or not sandbox_probe.get("outboundAttempted"):
         limitations.append("no-hostile-outbound-probe")
@@ -971,7 +979,7 @@ def _validate_sandbox_probe(probe: Any) -> None:
         not isinstance(probe["outboundOutcome"], str)
         or not isinstance(probe["enforcement"], str)
         or probe["outboundOutcome"] not in {"denied", "http-response", "transport-error", "not-attempted"}
-        or probe["enforcement"] not in {"python-audit-hook", "aca-egress-proxy", "unverified", "not-applicable"}
+        or probe["enforcement"] not in {"aca-egress-proxy", "unverified", "not-applicable"}
     ):
         raise UpstreamError("Sandbox probe has invalid network observations")
     status = probe["httpStatus"]
@@ -1143,45 +1151,6 @@ def _validate_tool_result(result: Any) -> dict[str, Any]:
         ):
             raise UpstreamError("Rejected document safety evidence violates the contract")
     return result
-
-
-def _tool_process_environment() -> dict[str, str]:
-    environment = {
-        "PATH": os.environ.get("PATH", ""),
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONUTF8": "1",
-    }
-    for optional_name in ("LANG", "LC_ALL", "SYSTEMROOT", "WINDIR", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
-        if os.environ.get(optional_name):
-            environment[optional_name] = os.environ[optional_name]
-    return environment
-
-
-class LocalDocumentTool:
-    def __init__(self, timeout: float):
-        self.timeout = timeout
-
-    def process(self, document: dict[str, str]) -> dict[str, Any]:
-        tool_path = _template_aware_path(DOCUMENT_TOOL_PATH)
-        try:
-            result = subprocess.run(
-                [sys.executable, str(tool_path), "--deny-network"],
-                input=json.dumps({"operation": "sanitize-v1", "document": document}, ensure_ascii=False),
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                check=False,
-                env=_tool_process_environment(),
-            )
-        except subprocess.TimeoutExpired as error:
-            raise UpstreamError("Local document tool timed out") from error
-        if result.returncode != 0:
-            raise UpstreamError("Local document tool rejected the request contract")
-        try:
-            parsed = json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise UpstreamError("Local document tool returned invalid JSON") from error
-        return _validate_tool_result(parsed)
 
 
 class AcaSandboxGroupDocumentTool:
@@ -1733,7 +1702,7 @@ class AgentHarness:
                 document_config.get("localTimeoutSeconds", 10),
                 "documentTool.localTimeoutSeconds",
             )
-            self.document_tool: LocalDocumentTool | AcaSandboxGroupDocumentTool | RemoteDocumentTool = (
+            self.document_tool: AcaSandboxGroupDocumentTool | RemoteDocumentTool | None = (
                 self._resolve_local_document_tool()
             )
             return
@@ -1766,13 +1735,16 @@ class AgentHarness:
             token_provider=self.token_provider,
         )
 
-    def _resolve_local_document_tool(self) -> LocalDocumentTool | AcaSandboxGroupDocumentTool:
+    def _resolve_local_document_tool(self) -> AcaSandboxGroupDocumentTool | RemoteDocumentTool | None:
         _load_dotenv_if_needed()
         sandbox_group = os.environ.get("ACA_SANDBOX_GROUP", "").strip()
-        aca_bin = shutil.which("aca") or str(Path.home() / ".local" / "bin" / "aca")
-        if sandbox_group and not Path(aca_bin).is_file():
-            raise ConfigurationError("ACA_SANDBOX_GROUP is configured but aca is missing. Install the ACA Sandbox CLI; local fallback is disabled.")
-        if sandbox_group and Path(aca_bin).exists():
+        found_aca = shutil.which("aca")
+        aca_bin = found_aca or str(Path.home() / ".local" / "bin" / "aca")
+        if sandbox_group and not (found_aca or Path(aca_bin).is_file()):
+            raise ConfigurationError(
+                "ACA_SANDBOX_GROUP is configured but aca is missing. Install the ACA Sandbox CLI; local fallback is disabled."
+            )
+        if sandbox_group:
             return AcaSandboxGroupDocumentTool(
                 sandbox_group=sandbox_group,
                 resource_group=(
@@ -1791,25 +1763,42 @@ class AgentHarness:
                 aca_bin=aca_bin,
                 timeout=getattr(self, "_local_timeout", 10.0),
             )
-        return LocalDocumentTool(getattr(self, "_local_timeout", 10.0))
+        document_config = _required_mapping(self.config.get("documentTool"), "documentTool")
+        aca_config = _required_mapping(document_config.get("aca"), "documentTool.aca")
+        pool_env_name = aca_config.get("poolManagementEndpointEnv")
+        if isinstance(pool_env_name, str) and pool_env_name and os.environ.get(pool_env_name, "").strip():
+            document_endpoint = _aca_endpoint(aca_config, "documentTool.aca")
+            return RemoteDocumentTool(
+                AcaSessionClient(
+                    document_endpoint,
+                    session_prefix="doc",
+                    transport=self.transport,
+                    token_provider=self.token_provider,
+                )
+            )
+        return None
 
     def _refresh_local_document_tool_if_needed(self) -> None:
-        if self.agent_runtime == AGENT_RUNTIME_LOCAL and isinstance(self.document_tool, LocalDocumentTool):
-            resolved = self._resolve_local_document_tool()
-            if isinstance(resolved, AcaSandboxGroupDocumentTool):
-                self.document_tool = resolved
+        if self.agent_runtime == AGENT_RUNTIME_LOCAL and self.document_tool is None:
+            self.document_tool = self._resolve_local_document_tool()
+
+    def _require_document_tool(self) -> AcaSandboxGroupDocumentTool | RemoteDocumentTool:
+        if self.document_tool is None:
+            raise HttpFailure(503, "sandbox-not-configured", SANDBOX_NOT_CONFIGURED_MESSAGE)
+        return self.document_tool
 
     def evidence(self, *, agent_dispatched: bool = False, document_dispatched: bool = False) -> dict[str, Any]:
         self._refresh_local_document_tool_if_needed()
         remote = self.agent_runtime == AGENT_RUNTIME_COPILOT_SANDBOX
         aca_group_tool = self.document_tool if isinstance(self.document_tool, AcaSandboxGroupDocumentTool) else None
-        remote_document = remote or aca_group_tool is not None
+        sandbox_configured = remote or self.document_tool is not None
         payload: dict[str, Any] = {
             "agentRuntime": self.agent_runtime,
             "agentIsolation": "aca-custom-container-session" if remote else "local-process",
             "documentToolRuntime": (
-                "aca-custom-container-session" if remote_document else "local-process-simulation"
+                "aca-custom-container-session" if sandbox_configured else "unconfigured"
             ),
+            "sandboxConfigured": sandbox_configured,
             "agentSessionDispatched": agent_dispatched,
             "documentSessionDispatched": document_dispatched or (aca_group_tool is not None and bool(aca_group_tool.last_sandbox_id)),
             "gatewayConfigured": (
@@ -1831,20 +1820,24 @@ class AgentHarness:
     def health(self) -> dict[str, Any]:
         domain = _read_json(DOMAIN_PATH)
         allowlist = _read_json(EGRESS_ALLOWLIST_PATH)
+        runtime = self.evidence()
         return {
             "status": "ok",
             "app": domain.get("name"),
+            "sandboxConfigured": runtime["sandboxConfigured"],
             "egressAllowlist": allowlist.get("allowedFqdns", []),
-            "runtime": self.evidence(),
+            "runtime": runtime,
         }
 
     def test_document(self, payload: Any) -> tuple[int, dict[str, Any]]:
         self._refresh_local_document_tool_if_needed()
         try:
             document = _parse_test_document_request(payload)
-            result = self.document_tool.process(document)
         except ContractError as error:
             raise HttpFailure(400, "invalid-request", str(error)) from error
+        document_tool = self._require_document_tool()
+        try:
+            result = document_tool.process(document)
         except UpstreamError as error:
             raise HttpFailure(502, "document-tool-failed", str(error)) from error
         status = 200 if result["verdict"] == "approved" else 422
@@ -1857,7 +1850,7 @@ class AgentHarness:
             "verdict": result["verdict"],
             "toolResult": result,
             "runtime": self.evidence(
-                document_dispatched=self.agent_runtime == AGENT_RUNTIME_COPILOT_SANDBOX
+                document_dispatched=isinstance(document_tool, RemoteDocumentTool)
             ),
         }
         if status == 422:
@@ -1874,15 +1867,16 @@ class AgentHarness:
             raise HttpFailure(400, "invalid-request", str(error)) from error
 
         tool_result = None
+        document_dispatched = False
         if document is not None:
+            document_tool = self._require_document_tool()
             try:
-                tool_result = self.document_tool.process(document)
+                tool_result = document_tool.process(document)
             except UpstreamError as error:
                 raise HttpFailure(502, "document-tool-failed", str(error)) from error
+            document_dispatched = isinstance(document_tool, RemoteDocumentTool)
             if tool_result["verdict"] == "rejected":
-                runtime = self.evidence(
-                    document_dispatched=self.agent_runtime == AGENT_RUNTIME_COPILOT_SANDBOX
-                )
+                runtime = self.evidence(document_dispatched=document_dispatched)
                 operator_message = (
                     f"Document rejected before any model call: {tool_result['message']}"
                 )
@@ -1895,10 +1889,11 @@ class AgentHarness:
                         tool_result, runtime, operator_message
                     ),
                 }
-        elif isinstance(self.document_tool, AcaSandboxGroupDocumentTool) or any(
+        elif any(
             token in message.lower()
             for token in ("document", "loan", "application", "summarize", "validate")
         ):
+            document_tool = self._require_document_tool()
             try:
                 fixture_path = ROOT / "examples" / "loan-application.txt"
                 fixture_content = (
@@ -1906,9 +1901,10 @@ class AgentHarness:
                     if fixture_path.exists()
                     else "# Loan Note\nApplicant contact: demo.user@example.com | (425) 555-0100"
                 )
-                tool_result = self.document_tool.process(
+                tool_result = document_tool.process(
                     {"name": "loan-application.txt", "content": fixture_content}
                 )
+                document_dispatched = isinstance(document_tool, RemoteDocumentTool)
             except UpstreamError as error:
                 raise HttpFailure(502, "document-tool-failed", str(error)) from error
 
@@ -1951,7 +1947,7 @@ class AgentHarness:
                 )
             evidence = self.evidence(
                 agent_dispatched=True,
-                document_dispatched=document is not None,
+                document_dispatched=document_dispatched,
             )
         else:
             try:
@@ -1965,7 +1961,7 @@ class AgentHarness:
                     tool_result=tool_result,
                 ) from error
             except GatewayPolicyBlockedError as blocked_err:
-                evidence = self.evidence()
+                evidence = self.evidence(document_dispatched=document_dispatched)
                 document_stage = (
                     {
                         "id": "document-tool",
@@ -2029,7 +2025,7 @@ class AgentHarness:
                     verdict=tool_result["verdict"] if tool_result else "not-requested",
                     tool_result=tool_result,
                 ) from error
-            evidence = self.evidence()
+            evidence = self.evidence(document_dispatched=document_dispatched)
             gateway_meta = getattr(self.gateway_client, "last_response_metadata", None)
             if isinstance(gateway_meta, dict) and gateway_meta:
                 evidence["gatewayResponse"] = gateway_meta

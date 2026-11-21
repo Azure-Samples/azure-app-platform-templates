@@ -1,6 +1,7 @@
-"""Deterministic stand-in for a credit-bureau soft pull.
+"""Deterministic synthetic credit profile fixtures (`SYN-###-##-####` only).
 
-This module never performs network I/O and accepts synthetic identifiers only.
+This module provides offline synthetic test data for pre-qualification math; it
+is not a live credit-bureau or lender API integration and performs no network I/O.
 """
 
 from __future__ import annotations

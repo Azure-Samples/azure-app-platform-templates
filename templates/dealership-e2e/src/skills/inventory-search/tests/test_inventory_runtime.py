@@ -22,7 +22,6 @@ class InventoryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("inventory-search", tools)
         response = await tools["inventory-search"].invoke(
             arguments={"max_price": 40000, "min_ev_range_miles": 250, "limit": 2},
-            skip_parsing=True,
         )
         result = json.loads(response)
         self.assertGreater(result["match_count"], 0)
@@ -36,7 +35,6 @@ class InventoryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("inventory-health-check", tools)
         response = await tools["inventory-health-check"].invoke(
             arguments={"threshold_override": 50},
-            skip_parsing=True,
         )
         result = json.loads(response)
         self.assertEqual(result["status"], "low_inventory")
@@ -75,7 +73,6 @@ class InventoryRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         response = await tools["inventory-search"].invoke(
             arguments={"max_price": 12345, "min_ev_range_miles": 500},
-            skip_parsing=True,
         )
         result = json.loads(response)
         self.assertIn(vehicle["id"], [car.get("id") for car in result["matches"]])

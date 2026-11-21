@@ -13,8 +13,10 @@ locally. The production `Microsoft.App/SandboxGroups` tier-S deployment must:
    duration, and exit status.
 6. Auto-delete each sandbox after the verdict is read.
 
-The checked-in `lender_stub.py` makes no network calls. When the production stub
-is hosted separately, its hostname is the sole application destination in the
-allow-list. Before a demo, verify the policy from inside a sandbox: the stub
-must succeed, while the app database and an unrelated HTTPS endpoint must fail.
-Treat failure of either negative test as a release blocker.
+The checked-in `synthetic_credit_fixtures.py` makes no network calls and uses
+synthetic `SYN-###-##-####` fixtures only. When a reviewed external lender
+endpoint is hosted separately, its exact hostname is the sole application
+destination in the allow-list. Before a demo, verify the policy from inside a
+sandbox: the reviewed endpoint must succeed, while the app database and an
+unrelated HTTPS endpoint must fail. Treat failure of either negative test as a
+release blocker.

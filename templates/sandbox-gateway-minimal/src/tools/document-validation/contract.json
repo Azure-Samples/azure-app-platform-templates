@@ -217,7 +217,7 @@
         "secretFileCount": { "type": "integer", "minimum": 0, "maximum": 5 },
         "outboundAttempted": { "type": "boolean" },
         "outboundOutcome": { "enum": ["denied", "http-response", "transport-error", "not-attempted"] },
-        "enforcement": { "enum": ["python-audit-hook", "aca-egress-proxy", "unverified", "not-applicable"] },
+        "enforcement": { "enum": ["aca-egress-proxy", "unverified", "not-applicable"] },
         "httpStatus": { "type": ["integer", "null"], "minimum": 100, "maximum": 599 },
         "acaDecisionCount": { "type": "integer", "minimum": 0, "maximum": 100 },
         "acaDeniedCount": { "type": "integer", "minimum": 0, "maximum": 100 },

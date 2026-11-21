@@ -8,7 +8,7 @@ capabilities:
     links: [sandbox, gateway]
   sandbox:
     path: src/tools/document-validation
-    # ACA_SANDBOX_GROUP selects microVMs; otherwise a local process, not OS isolation.
+    # Requires ACA_SANDBOX_GROUP (microVMs via aca CLI) or DOCUMENT_TOOL_SESSION_POOL_ENDPOINT (ACA session pool).
     interface: subprocess
     links: [agent]
   gateway:

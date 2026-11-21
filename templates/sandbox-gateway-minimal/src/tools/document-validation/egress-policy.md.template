@@ -83,13 +83,13 @@ A zero count is not an exhaustive secret scan. A nonzero count,
 successful unauthorized request, or unverified denial needs investigation.
 Instruction-override checks remain separate and do not claim a network test.
 
-## Local fallback and custom-container sessions
+## Fail-closed sandbox requirement and custom-container sessions
 
-Without an ACA group, the local tool receives a minimal allowlisted
-environment and installs a Python audit hook denying outbound socket/DNS
-operations. The probe actually exercises that policy. It is still a
-**local process simulation**, not OS or Azure isolation; use synthetic data.
-It does not protect against arbitrary native code or child executables.
+There is no local subprocess simulation for document validation. When neither
+`ACA_SANDBOX_GROUP` nor `DOCUMENT_TOOL_SESSION_POOL_ENDPOINT` is configured,
+`GET /health` reports `documentToolRuntime: "unconfigured"`
+(`sandboxConfigured: false`), and `POST /test-document` or document-bearing
+`POST /invoke` fails closed with HTTP 503 (`sandbox-not-configured`).
 
 The optional Copilot SDK mode still needs a document custom-container
 session pool separate from the agent pool. The document deployment must:
