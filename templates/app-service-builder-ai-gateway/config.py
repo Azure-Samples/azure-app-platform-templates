@@ -17,6 +17,7 @@ HOST_PATTERN = re.compile(
 APP_HOST_SUFFIX = ".app.westus2.builderapps.dev"
 GATEWAY_HOST_SUFFIX = ".ai.gateway.azure.com"
 MODEL_ALIAS = "appservice-chat"
+DEFAULT_MCP_SKILL_URL = "http://127.0.0.1:7071/runtime/webhooks/mcp"
 MAX_TTL = timedelta(hours=2)
 NIL_UUID = uuid.UUID(int=0)
 
@@ -26,7 +27,11 @@ def _merge_default_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
         return env
     root = Path(__file__).resolve().parent
     merged: dict[str, str] = {}
-    for candidate in (root / "src" / "agent" / ".env", root / ".env"):
+    for candidate in (
+        root / ".azure-app-platform" / "ports.env",
+        root / "src" / "agent" / ".env",
+        root / ".env",
+    ):
         if candidate.is_file():
             for key, val in dotenv_values(candidate).items():
                 if key and val is not None and val.strip():
@@ -35,6 +40,27 @@ def _merge_default_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
         if val is not None and val.strip():
             merged[key] = val
     return merged
+
+
+def _resolve_mcp_skill_url(source: Mapping[str, str]) -> str:
+    explicit = source.get("MCP_SKILL_URL", "").strip()
+    if explicit:
+        parsed = urlparse(explicit)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("MCP_SKILL_URL must be a valid http or https URL.")
+        return explicit
+    raw_port = (
+        source.get("SKILL_TEXT_INSIGHTS_PORT", "").strip()
+        or source.get("SKILL_PORT", "").strip()
+    )
+    if not raw_port:
+        return DEFAULT_MCP_SKILL_URL
+    if not raw_port.isascii() or not raw_port.isdecimal():
+        raise ValueError("SKILL_TEXT_INSIGHTS_PORT must be an integer from 1024 to 65535.")
+    port = int(raw_port, 10)
+    if port < 1024 or port > 65535:
+        raise ValueError("SKILL_TEXT_INSIGHTS_PORT must be an integer from 1024 to 65535.")
+    return f"http://127.0.0.1:{port}/runtime/webhooks/mcp"
 
 
 @dataclass(frozen=True)
@@ -47,6 +73,11 @@ class SampleConfig:
     api_key: str | None = None
     explicit_base_url: str | None = None
     builder_app_name: str = ""
+    mcp_skill_url: str = DEFAULT_MCP_SKILL_URL
+
+    @property
+    def gateway_configured(self) -> bool:
+        return bool(self.gateway_host or self.explicit_base_url)
 
     @property
     def origin(self) -> str:
@@ -189,6 +220,7 @@ def load_config(
         source.get("AZURE_BUILDER_APP_NAME", "").strip().lower()
         or source.get("BUILDER_APP_NAME", "").strip().lower()
     )
+    mcp_skill_url = _resolve_mcp_skill_url(source)
 
     return SampleConfig(
         public_host=public_host,
@@ -199,6 +231,7 @@ def load_config(
         api_key=api_key,
         explicit_base_url=explicit_base_url,
         builder_app_name=builder_app_name,
+        mcp_skill_url=mcp_skill_url,
     )
 
 

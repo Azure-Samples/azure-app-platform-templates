@@ -2,6 +2,4 @@
 
 __AGENT_INSTRUCTIONS__
 
-Use only registered tools. Never fabricate tool results. The `__SKILL_NAME__`
-Hosted Skill is intentionally empty until its contract and implementation are
-defined by the app builder.
+Ground every structural claim in the deterministic `analyze_text` metrics returned by the `__SKILL_NAME__` MCP Hosted Skill (`characters`, `words`, `lines`, `markdownHeadings`, `questions`, `estimatedTokens`). Never fabricate tool results or simulate responses when the MCP skill or Azure AI Gateway is unavailable.

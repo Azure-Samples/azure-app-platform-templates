@@ -115,7 +115,10 @@ def test_index_and_health_include_security_headers() -> None:
         assert health.json() == {
             "status": "ok",
             "gateway": "sample-gw.ai.gateway.azure.com",
+            "gatewayConfigured": True,
             "model": "appservice-chat",
+            "mcpSkill": "text-insights",
+            "mcpSkillUrl": "http://127.0.0.1:7071/runtime/webhooks/mcp",
         }
     assert service.closed is True
 
@@ -316,6 +319,72 @@ def test_expired_sample_returns_410_everywhere_except_health() -> None:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "expired"
+
+
+def test_direct_analyze_text_action_and_503_when_gateway_or_mcp_unavailable() -> None:
+    from config import SampleConfig
+    from gateway import GatewayAgentService, McpSkillUnavailableError, McpToolInputError
+
+    class ActionFakeService(FakeAgentService):
+        async def analyze_text(self, text: str) -> dict[str, int]:
+            if "\x00" in text:
+                raise McpToolInputError("text must not contain NUL or control characters.")
+            return {
+                "characters": len(text),
+                "words": len(text.split()),
+                "lines": len(text.splitlines()),
+                "markdownHeadings": 1,
+                "questions": text.count("?"),
+                "estimatedTokens": max(1, (len(text) + 3) // 4),
+            }
+
+    config = make_config()
+    with TestClient(create_app(config, agent_service=ActionFakeService())) as client:
+        ok_resp = client.post("/api/tools/analyze_text", json={"text": "# Heading\nFast MCP?"})
+        assert ok_resp.status_code == 200
+        assert ok_resp.json()["tool"] == "analyze_text"
+        assert ok_resp.json()["metrics"]["questions"] == 1
+
+        bad_resp = client.post("/api/tools/analyze_text", json={"text": "bad\x00input"})
+        assert bad_resp.status_code == 400
+        assert bad_resp.json()["error"] == "invalid_input"
+
+    unconfigured = SampleConfig(
+        public_host="",
+        expires_at=None,
+        client_id=None,
+        gateway_host="",
+        mcp_skill_url="http://127.0.0.1:65500/runtime/webhooks/mcp",
+    )
+    with TestClient(create_app(unconfigured, agent_service=GatewayAgentService(unconfigured))) as client:
+        invoke_503 = client.post("/invoke", json={"prompt": "Hello"})
+        assert invoke_503.status_code == 503
+        assert invoke_503.json()["error"] == "gateway_not_configured"
+
+        stream_503 = client.post(
+            "/api/chat/stream",
+            headers={"Origin": "http://127.0.0.1:8080"},
+            json={"messages": [{"role": "user", "content": "Hello"}]},
+        )
+        assert stream_503.status_code == 503
+        assert stream_503.json()["error"] == "gateway_not_configured"
+
+        tool_503 = client.post("/api/tools/analyze_text", json={"text": "Hello"})
+        assert tool_503.status_code == 503
+        assert tool_503.json()["error"] == "mcp_skill_unavailable"
+
+    class UnreachableMcpService(FakeAgentService):
+        async def ensure_ready(self) -> None:
+            raise McpSkillUnavailableError("MCP skill unreachable")
+
+    with TestClient(create_app(config, agent_service=UnreachableMcpService())) as client:
+        chat_mcp_503 = client.post(
+            "/api/chat/stream",
+            headers={"Origin": config.origin},
+            json={"messages": [{"role": "user", "content": "Hello"}]},
+        )
+        assert chat_mcp_503.status_code == 503
+        assert chat_mcp_503.json()["error"] == "mcp_skill_unavailable"
 
 
 def test_concurrency_limit_returns_429_when_all_stream_slots_are_busy() -> None:

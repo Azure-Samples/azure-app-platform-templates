@@ -2,18 +2,22 @@ name: __APP_SLUG__
 purpose: "__PURPOSE_JSON__"
 capabilities:
   web:
+    kind: web
     path: src/web
     interface: http://localhost:3000
     links: [agent]
   agent:
+    kind: agent
     path: src/agent
     interface: http://localhost:8088
     links: [gateway, skills]
   gateway:
+    kind: gateway
     path: infra-ai-gateway
     interface: configuration
     links: [agent]
   skills:
+    kind: mcp-skill
     path: src/skills/__SKILL_NAME__
-    interface: http://localhost:7071
+    interface: http://localhost:7071/runtime/webhooks/mcp
     links: [agent]

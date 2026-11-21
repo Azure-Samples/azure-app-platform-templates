@@ -1,0 +1,14 @@
+[project]
+name = "mcp-hosted-skill"
+version = "0.1.0"
+description = "Deterministic MCP Hosted Skill (__SKILL_NAME__)"
+requires-python = "==3.13.*"
+dependencies = [
+  "azurefunctions-agents-runtime",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

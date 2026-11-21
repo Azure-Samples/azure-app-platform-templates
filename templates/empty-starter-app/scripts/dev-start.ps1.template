@@ -6,17 +6,40 @@ $ForceClean = $Clean.IsPresent -or ($env:FORCE_CLEAN -eq "1")
 $RunDir = Join-Path $Root ".dev-run"
 . (Join-Path $PSScriptRoot "load-ports.ps1")
 Import-AppPorts $Root
+$RawSkillName = "__SKILL_NAME__"
+$SkillName = if ([string]::IsNullOrWhiteSpace($RawSkillName) -or $RawSkillName.StartsWith("__SKILL")) { "text-insights" } else { $RawSkillName }
 $AgentPort = if ($env:AGENT_PORT) { [int]$env:AGENT_PORT } else { 8088 }
 $WebPort = if ($env:WEB_PORT) { [int]$env:WEB_PORT } else { 3000 }
-$SkillPort = if ($env:SKILL_PORT) { [int]$env:SKILL_PORT } else { 7071 }
+$SkillPort = Get-SkillPort $SkillName 0 $true
 $env:AGENT_PORT = "$AgentPort"
 $env:WEB_PORT = "$WebPort"
+$env:SKILL_PORT = "$SkillPort"
 $env:AGENT_URL = "http://127.0.0.1:$AgentPort"
+if (-not $env:MCP_SKILL_URL) {
+  $env:MCP_SKILL_URL = "http://127.0.0.1:$SkillPort/runtime/webhooks/mcp"
+}
 & (Join-Path $PSScriptRoot "dev-stop.ps1") | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "The previous app processes could not be stopped safely." }
 New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
 $IndexUrl = if ($env:PIP_INDEX_URL) { $env:PIP_INDEX_URL } elseif ($env:UV_INDEX_URL) { $env:UV_INDEX_URL } else { $env:UV_DEFAULT_INDEX }
+if (-not $IndexUrl -and (Get-Command python -ErrorAction SilentlyContinue)) {
+  $ConfiguredIndex = & python -m pip config get global.index-url 2>$null
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($ConfiguredIndex)) { $IndexUrl = $ConfiguredIndex.Trim() }
+}
 if ($IndexUrl) { $env:PIP_INDEX_URL = $env:UV_INDEX_URL = $env:UV_DEFAULT_INDEX = $IndexUrl }
+
+foreach ($envCandidate in @((Join-Path $Root ".env"), (Join-Path $Root "src/agent/.env"))) {
+  if (Test-Path $envCandidate) {
+    foreach ($line in Get-Content $envCandidate) {
+      if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') {
+        $k = $Matches[1]
+        $v = $Matches[2].Trim().Trim('"').Trim("'")
+        if ($v) { [Environment]::SetEnvironmentVariable($k, $v, "Process") }
+      }
+    }
+    break
+  }
+}
 
 function Wait-Health($Name, $Port, $Route, $Process) {
   $lastError = "No HTTP response."
@@ -37,54 +60,46 @@ function Wait-Health($Name, $Port, $Route, $Process) {
   throw "$Name did not become ready on port $Port`: $lastError. See .dev-run/$Name.err.log."
 }
 
-$processes = @()
-function Save-ProcessState {
-  if ($script:processes.Count -eq 0) { Set-Content (Join-Path $RunDir "processes.json") "[]" }
-  else { @($script:processes) | ConvertTo-Json | Set-Content (Join-Path $RunDir "processes.json") }
+$StateFile = Join-Path $RunDir "processes.json"
+function Read-ProcessState {
+  if (-not (Test-Path -LiteralPath $StateFile)) { return @() }
+  $raw = Get-Content -LiteralPath $StateFile -Raw
+  if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+  return @($raw | ConvertFrom-Json)
+}
+function Save-ProcessRecord($Record) {
+  $items = @(Read-ProcessState | Where-Object { $_.name -ne $Record.name })
+  $items += $Record
+  @($items) | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $StateFile
 }
 function Register-TrackedProcess($Name, $Port, $Process) {
-  $record = @{ name = $Name; port = $Port; pid = $Process.Id; startedAt = $null }
-  $script:processes += $record
-  Save-ProcessState
+  $record = [pscustomobject]@{ name = $Name; port = $Port; pid = $Process.Id; startedAt = $null }
+  Save-ProcessRecord $record
   try { $record.startedAt = $Process.StartTime.ToUniversalTime().ToString("O") }
   catch { throw "Could not record process identity for $Name. Verify PID $($Process.Id) manually." }
-  Save-ProcessState
+  Save-ProcessRecord $record
 }
 try {
   if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw "uv is required." }
-  $SkillDir = Join-Path $Root "src/skills/__SKILL_NAME__"
-  if (-not $SkipSkill -and (Test-Path $SkillDir)) {
-    $func = if (Get-Command func.cmd -ErrorAction SilentlyContinue) { "func.cmd" }
-      elseif (Get-Command func -ErrorAction SilentlyContinue) { "func" }
-      else { throw "Azure Functions Core Tools is required for the starter skill. Install it or run with -SkipSkill." }
-    if ($ForceClean -and (Test-Path (Join-Path $SkillDir ".venv"))) {
-      Remove-Item -Recurse -Force (Join-Path $SkillDir ".venv")
+  $SkillDir = Join-Path $Root "src/skills/$SkillName"
+  if (-not (Test-Path -LiteralPath $SkillDir) -and (Test-Path -LiteralPath (Join-Path $Root "src/skills/__SKILL__"))) {
+    $SkillDir = Join-Path $Root "src/skills/__SKILL__"
+  }
+  if ($SkipSkill) {
+    Write-Host "Hosted Skill skipped (-SkipSkill)."
+  } else {
+    $McpStartScript = Join-Path $PSScriptRoot "lifecycle/mcp-skill-start.ps1"
+    $McpArgs = @{
+      Name   = $SkillName
+      Path   = $SkillDir
+      Port   = $SkillPort
+      RunDir = $RunDir
     }
-    $skillArgs = if (Test-Path (Join-Path $SkillDir "pyproject.toml")) {
-      @("run", $func, "start", "--port", "$SkillPort")
-    } else {
-      @("run", "--with-requirements", "requirements.txt", $func, "start", "--port", "$SkillPort")
+    if ($ForceClean) { $McpArgs["Clean"] = $true }
+    & $McpStartScript @McpArgs
+    if ($LASTEXITCODE -ne 0) {
+      throw "MCP Hosted Skill '$SkillName' failed to start on port $SkillPort."
     }
-    $previousWorkerRuntime = [Environment]::GetEnvironmentVariable("FUNCTIONS_WORKER_RUNTIME", "Process")
-    $previousTemp = [Environment]::GetEnvironmentVariable("TEMP", "Process")
-    $previousTmp = [Environment]::GetEnvironmentVariable("TMP", "Process")
-    $skillTemp = Join-Path $Root ".dev-temp/__SKILL_NAME__"
-    New-Item -ItemType Directory -Force -Path $skillTemp | Out-Null
-    try {
-      if (-not (Test-Path (Join-Path $SkillDir "local.settings.json")) -and -not $previousWorkerRuntime) {
-        $env:FUNCTIONS_WORKER_RUNTIME = "python"
-      }
-      $env:TEMP = $skillTemp
-      $env:TMP = $skillTemp
-      $skill = Start-Process uv -ArgumentList $skillArgs -WorkingDirectory $SkillDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput (Join-Path $RunDir "skill.log") -RedirectStandardError (Join-Path $RunDir "skill.err.log")
-    } finally {
-      [Environment]::SetEnvironmentVariable("FUNCTIONS_WORKER_RUNTIME", $previousWorkerRuntime, "Process")
-      [Environment]::SetEnvironmentVariable("TEMP", $previousTemp, "Process")
-      [Environment]::SetEnvironmentVariable("TMP", $previousTmp, "Process")
-    }
-    Register-TrackedProcess "skill" $SkillPort $skill
-    Wait-Health "skill" $SkillPort "/api/health" $skill
   }
   $AgentDir = Join-Path $Root "src/agent"
   if ($ForceClean -and (Test-Path (Join-Path $AgentDir ".venv"))) {
@@ -98,9 +113,8 @@ try {
     -RedirectStandardOutput (Join-Path $RunDir "web.log") -RedirectStandardError (Join-Path $RunDir "web.err.log")
   Register-TrackedProcess "web" $WebPort $web
   Wait-Health "web" $WebPort "/" $web
-  Write-Host "__APP_NAME__ started: web http://localhost:$WebPort, agent http://localhost:$AgentPort"
+  Write-Host "__APP_NAME__ started: web http://localhost:$WebPort, agent http://localhost:$AgentPort, mcp-skill $($env:MCP_SKILL_URL)"
 } catch {
-  Save-ProcessState
   & (Join-Path $PSScriptRoot "dev-stop.ps1")
   throw
 }
