@@ -85,11 +85,13 @@ command -v curl >/dev/null 2>&1 || {
   exit 1
 }
 
+unset UV_FROZEN UV_LOCKED UV_NO_SYNC UV_OFFLINE
 index_url="${PIP_INDEX_URL:-${UV_INDEX_URL:-${UV_DEFAULT_INDEX:-}}}"
 if [[ -z "$index_url" ]] && command -v pip3 >/dev/null 2>&1; then
   index_url="$(pip3 config get global.index-url 2>/dev/null || true)"
 fi
 if [[ -n "$index_url" ]]; then
+  unset PIP_EXTRA_INDEX_URL UV_EXTRA_INDEX_URL
   export PIP_INDEX_URL="$index_url" UV_INDEX_URL="$index_url" UV_DEFAULT_INDEX="$index_url"
 fi
 
