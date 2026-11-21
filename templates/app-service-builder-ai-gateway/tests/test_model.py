@@ -40,6 +40,7 @@ def test_load_config_supports_local_ai_gateway_env() -> None:
             "AI_GATEWAY_BASE_URL": "https://my-gw.ai.gateway.azure.com/default/models/openai/v1",
             "AI_GATEWAY_API_KEY": "secret-key",
             "AI_GATEWAY_MODEL": "gpt-5.4",
+            "SKILL_TEXT_INSIGHTS_PORT": "7099",
         },
         now=fixed_now(),
     )
@@ -47,6 +48,7 @@ def test_load_config_supports_local_ai_gateway_env() -> None:
     assert config.model_url == "https://my-gw.ai.gateway.azure.com/default/models/openai/v1/"
     assert config.model == "gpt-5.4"
     assert config.api_key == "secret-key"
+    assert config.mcp_skill_url == "http://127.0.0.1:7099/runtime/webhooks/mcp"
     assert config.is_expired(fixed_now()) is False
     assert config.allowed_origin("http://127.0.0.1:8080") is True
     assert config.allowed_origin("http://localhost:8080") is True
@@ -89,19 +91,45 @@ def test_gateway_agent_service_streams_non_empty_updates() -> None:
 
             return ResponseStream(generator())
 
-    async def collect() -> list[str]:
-        service = GatewayAgentService(config, chat_client=FakeChatClient())
+    class StubMcpTool:
+        def __init__(self) -> None:
+            self.is_connected = False
+            self.connect_calls = 0
+            self.closed = False
+            self.functions = [SimpleNamespace(name="analyze_text")]
+
+        async def connect(self, *, reset: bool = False) -> None:
+            self.connect_calls += 1
+            self.is_connected = True
+
+        async def call_tool(self, name: str, **kwargs):
+            assert name == "analyze_text"
+            text = kwargs["text"]
+            return [Content.from_text(f'{{"characters": {len(text)}, "words": {len(text.split())}, "lines": 1, "markdownHeadings": 0, "questions": 0, "estimatedTokens": 4}}')]
+
+        async def close(self) -> None:
+            self.closed = True
+            self.is_connected = False
+
+    stub_mcp = StubMcpTool()
+
+    async def collect() -> tuple[list[str], dict[str, int]]:
+        service = GatewayAgentService(config, chat_client=FakeChatClient(), mcp_tool=stub_mcp)
         try:
+            metrics = await service.analyze_text("Fast deterministic check")
             chunks = []
             async for item in service.stream_text(
                 [{"role": "user", "content": "Test the gateway"}]
             ):
                 chunks.append(item)
-            return chunks
+            return chunks, metrics
         finally:
             await service.aclose()
 
-    chunks = asyncio.run(collect())
+    chunks, metrics = asyncio.run(collect())
+    assert metrics["words"] == 3
+    assert stub_mcp.connect_calls == 1
+    assert stub_mcp.closed is True
     assert chunks == ["Hello", " from gateway"]
     assert len(seen_messages) == 1
     assert seen_messages[0].role == "user"
@@ -109,11 +137,14 @@ def test_gateway_agent_service_streams_non_empty_updates() -> None:
 
 
 def test_gateway_agent_service_initializes_default_openai_client_with_api_key() -> None:
+    from agent_framework import MCPStreamableHTTPTool
+
     config = load_config(
         {
             "AI_GATEWAY_BASE_URL": "https://my-gw.ai.gateway.azure.com/default/models/openai/v1",
             "AI_GATEWAY_API_KEY": "secret-key",
             "AI_GATEWAY_MODEL": "gpt-5-mini",
+            "MCP_SKILL_URL": "http://127.0.0.1:7081/runtime/webhooks/mcp",
         },
         now=fixed_now(),
     )
@@ -122,8 +153,10 @@ def test_gateway_agent_service_initializes_default_openai_client_with_api_key() 
         service = GatewayAgentService(config)
         try:
             assert service._chat_client.default_headers == {"api-key": "secret-key"}
+            assert isinstance(service.mcp_tool, MCPStreamableHTTPTool)
+            assert service.mcp_tool.url == "http://127.0.0.1:7081/runtime/webhooks/mcp"
+            assert list(service.mcp_tool.allowed_tools or ()) == ["analyze_text"]
         finally:
             await service.aclose()
 
     asyncio.run(build_and_close())
-

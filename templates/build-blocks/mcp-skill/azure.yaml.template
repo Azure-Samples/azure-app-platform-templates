@@ -1,0 +1,8 @@
+name: __SKILL_NAME__
+metadata:
+  template: azure-app-platform-mcp-skill@0.1.0
+services:
+  __SKILL_NAME__:
+    project: .
+    language: python
+    host: function

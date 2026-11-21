@@ -17,7 +17,14 @@ RUN_DIR="$ROOT/.dev-run"
 load_app_ports "$ROOT"
 WEB_PORT="${WEB_PORT:-3000}"
 AGENT_PORT="${AGENT_PORT:-8088}"
-SKILL_PORT="${SKILL_PORT:-7071}"
+RAW_SKILL_NAME="__SKILL_NAME__"
+if [[ -z "$RAW_SKILL_NAME" || "$RAW_SKILL_NAME" == "__SKILL"* ]]; then
+  SKILL_NAME="text-insights"
+else
+  SKILL_NAME="$RAW_SKILL_NAME"
+fi
+SKILL_PORT="$(skill_port_for_name "$SKILL_NAME" 0 1)"
+export SKILL_PORT
 SKIP_SKILL=0
 FORCE_CLEAN="${FORCE_CLEAN:-0}"
 while (($#)); do
@@ -53,12 +60,28 @@ record_process() {
 }
 
 index_url="${PIP_INDEX_URL:-${UV_INDEX_URL:-${UV_DEFAULT_INDEX:-}}}"
+if [[ -z "$index_url" ]] && command -v pip3 >/dev/null 2>&1; then
+  index_url="$(pip3 config get global.index-url 2>/dev/null || true)"
+fi
 if [[ -n "$index_url" ]]; then
   export PIP_INDEX_URL="$index_url" UV_INDEX_URL="$index_url" UV_DEFAULT_INDEX="$index_url"
 fi
 
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ROOT/.env"
+  set +a
+elif [[ -f "$ROOT/src/agent/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ROOT/src/agent/.env"
+  set +a
+fi
+
 command -v uv >/dev/null || { echo "uv is required." >&2; exit 1; }
 command -v npm >/dev/null || { echo "npm is required." >&2; exit 1; }
+command -v curl >/dev/null || { echo "curl is required." >&2; exit 1; }
 if [[ "$FORCE_CLEAN" == "1" ]]; then
   rm -rf "$ROOT/src/agent/.venv" "$ROOT/src/web/node_modules"
 fi
@@ -66,59 +89,54 @@ if [[ ! -d "$ROOT/src/agent/.venv" || "$FORCE_CLEAN" == "1" ]]; then
   (cd "$ROOT/src/agent" && uv sync)
 fi
 
-port_listening() {
-  (echo >/dev/tcp/127.0.0.1/"$1") >/dev/null 2>&1
-}
-
-wait_port() {
-  local name="$1" port="$2" pid="$3" deadline=$((SECONDS + 30))
+wait_http() {
+  local name="$1" port="$2" route="$3" pid="$4" deadline=$((SECONDS + 30))
   while ((SECONDS < deadline)); do
-    if port_listening "$port"; then
+    if curl -fsS --max-time 2 "http://127.0.0.1:$port$route" >/dev/null 2>&1; then
       echo "[$name] READY on port $port"
       return 0
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
-      echo "[$name] exited before opening port $port" >&2
+      echo "[$name] exited before becoming ready on port $port" >&2
       sed -n '1,100p' "$RUN_DIR/$name.log" >&2 || true
       "$ROOT/scripts/dev-stop.sh" || echo "Process cleanup is incomplete." >&2
       exit 1
     fi
     sleep 0.15
   done
-  echo "[$name] timed out opening port $port" >&2
+  echo "[$name] timed out becoming ready on port $port" >&2
   "$ROOT/scripts/dev-stop.sh" || echo "Process cleanup is incomplete." >&2
   exit 1
 }
 
-skill_dir="$ROOT/src/skills/__SKILL_NAME__"
+skill_dir="$ROOT/src/skills/$SKILL_NAME"
+if [[ ! -d "$skill_dir" && -d "$ROOT/src/skills/__SKILL__" ]]; then
+  skill_dir="$ROOT/src/skills/__SKILL__"
+fi
 if ((SKIP_SKILL)); then
-  echo "Hosted Skill skipped."
-elif [[ -d "$skill_dir" ]] && command -v uv >/dev/null && command -v func >/dev/null; then
-  if [[ "$FORCE_CLEAN" == "1" && -d "$skill_dir/.venv" ]]; then
-    rm -rf "$skill_dir/.venv"
-  fi
-  (
-    cd "$skill_dir"
-    if [[ -f "$skill_dir/pyproject.toml" ]]; then
-      exec uv run func start --port "$SKILL_PORT"
-    else
-      exec uv run --with-requirements requirements.txt func start --port "$SKILL_PORT"
-    fi
-  ) >"$RUN_DIR/skill.log" 2>&1 &
-  skill_pid=$!
-  record_process "skill" "$SKILL_PORT" "$skill_pid"
-  wait_port skill "$SKILL_PORT" "$skill_pid"
+  echo "Hosted Skill skipped (--skip-skill)."
 else
-  echo "Hosted Skill not started: install uv and Azure Functions Core Tools when you are ready to edit it."
+  clean_arg=()
+  [[ "$FORCE_CLEAN" == "1" ]] && clean_arg=(--clean)
+  if ! "$ROOT/scripts/lifecycle/mcp-skill-start.sh" \
+    --name "$SKILL_NAME" \
+    --path "$skill_dir" \
+    --port "$SKILL_PORT" \
+    --run-dir "$RUN_DIR" \
+    ${clean_arg[@]+"${clean_arg[@]}"}; then
+    "$ROOT/scripts/dev-stop.sh" || echo "Process cleanup is incomplete." >&2
+    exit 1
+  fi
 fi
 
+MCP_SKILL_URL="${MCP_SKILL_URL:-http://127.0.0.1:$SKILL_PORT/runtime/webhooks/mcp}"
 (
   cd "$ROOT/src/agent"
-  exec env UV_NO_SYNC=1 AGENT_PORT="$AGENT_PORT" uv run main.py
+  exec env UV_NO_SYNC=1 AGENT_PORT="$AGENT_PORT" SKILL_PORT="$SKILL_PORT" MCP_SKILL_URL="$MCP_SKILL_URL" uv run main.py
 ) >"$RUN_DIR/agent.log" 2>&1 &
 agent_pid=$!
 record_process "agent" "$AGENT_PORT" "$agent_pid"
-wait_port agent "$AGENT_PORT" "$agent_pid"
+wait_http agent "$AGENT_PORT" "/health" "$agent_pid"
 
 (
   cd "$ROOT/src/web"
@@ -126,6 +144,6 @@ wait_port agent "$AGENT_PORT" "$agent_pid"
 ) >"$RUN_DIR/web.log" 2>&1 &
 web_pid=$!
 record_process "web" "$WEB_PORT" "$web_pid"
-wait_port web "$WEB_PORT" "$web_pid"
+wait_http web "$WEB_PORT" "/" "$web_pid"
 
-echo "__APP_NAME__ started: web http://localhost:$WEB_PORT, agent http://localhost:$AGENT_PORT"
+echo "__APP_NAME__ started: web http://localhost:$WEB_PORT, agent http://localhost:$AGENT_PORT, mcp-skill $MCP_SKILL_URL"

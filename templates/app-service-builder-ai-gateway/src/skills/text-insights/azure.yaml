@@ -1,0 +1,8 @@
+name: text-insights
+metadata:
+  template: azure-app-platform-mcp-skill@0.1.0
+services:
+  text-insights:
+    project: .
+    language: python
+    host: function

@@ -169,4 +169,3 @@ if [[ -n "$agent_dir" ]]; then
 else
   echo "__APP_NAME__ started: web http://localhost:$WEB_PORT"
 fi
-
