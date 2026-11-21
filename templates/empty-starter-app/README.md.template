@@ -44,4 +44,3 @@ Stop this app with:
 ```
 
 `POST /api/tools/analyze_text` on the agent invokes the deterministic MCP tool directly with zero LLM calls. `POST /responses` executes `analyze_text` over MCP and synthesizes a grounded reply through Azure AI Gateway, returning HTTP `503` (`gateway_not_configured` or `mcp_skill_unavailable`) when either dependency is unavailable.
-

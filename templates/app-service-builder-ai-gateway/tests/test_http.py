@@ -282,17 +282,37 @@ def test_chat_stream_validates_payload_and_streams_sse() -> None:
         assert invoked.json()["response"] == "Azure AI Gateway"
 
 
-def test_chat_stream_reports_upstream_errors_in_sse() -> None:
+def test_chat_stream_and_invoke_return_503_on_unreachable_gateway_and_sse_on_midstream_failure() -> None:
     config = make_config()
-    service = FailingAgentService()
-    with TestClient(create_app(config, agent_service=service)) as client:
-        response = client.post(
+    failing_service = FailingAgentService()
+    with TestClient(create_app(config, agent_service=failing_service)) as client:
+        invoke_resp = client.post("/invoke", json={"prompt": "Hello"})
+        assert invoke_resp.status_code == 503
+        assert invoke_resp.json()["error"] == "gateway_unavailable"
+
+        stream_resp = client.post(
             "/api/chat/stream",
             headers={"Origin": config.origin},
             json={"messages": [{"role": "user", "content": "Hello"}]},
         )
-        assert response.status_code == 200
-        assert 'event: error\ndata: {"code":"upstream_unavailable"' in response.text
+        assert stream_resp.status_code == 503
+        assert stream_resp.json()["error"] == "gateway_unavailable"
+
+    class MidStreamFailingService(FakeAgentService):
+        async def stream_text(self, messages: Sequence[dict[str, str]]) -> AsyncIterator[str]:
+            self.calls.append([dict(item) for item in messages])
+            yield "Partial "
+            raise RuntimeError("mid-stream disconnect")
+
+    with TestClient(create_app(config, agent_service=MidStreamFailingService())) as client:
+        mid_resp = client.post(
+            "/api/chat/stream",
+            headers={"Origin": config.origin},
+            json={"messages": [{"role": "user", "content": "Hello"}]},
+        )
+        assert mid_resp.status_code == 200
+        assert 'event: delta\ndata: {"text":"Partial "}\n\n' in mid_resp.text
+        assert 'event: error\ndata: {"code":"upstream_unavailable"' in mid_resp.text
 
 
 def test_expired_sample_returns_410_everywhere_except_health() -> None:

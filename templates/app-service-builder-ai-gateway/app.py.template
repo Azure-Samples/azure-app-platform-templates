@@ -250,8 +250,8 @@ def create_app(
         except Exception as exc:
             err_msg = str(exc).strip() or "The gateway request did not complete."
             return JSONResponse(
-                {"status": "error", "error": "upstream_unavailable", "message": err_msg},
-                status_code=502,
+                {"status": "error", "error": "gateway_unavailable", "message": err_msg},
+                status_code=503,
                 headers={"Cache-Control": "no-store"},
             )
         finally:
@@ -315,10 +315,44 @@ def create_app(
                     headers={"Cache-Control": "no-store"},
                 )
 
+        stream_iter = service.stream_text(messages).__aiter__()
+        has_first_delta = False
+        first_delta = ""
+        try:
+            first_delta = await stream_iter.__anext__()
+            has_first_delta = True
+        except StopAsyncIteration:
+            has_first_delta = False
+        except GatewayNotConfiguredError as exc:
+            semaphore.release()
+            return JSONResponse(
+                {"error": "gateway_not_configured", "message": str(exc)},
+                status_code=503,
+                headers={"Cache-Control": "no-store"},
+            )
+        except McpSkillUnavailableError as exc:
+            semaphore.release()
+            return JSONResponse(
+                {"error": "mcp_skill_unavailable", "message": str(exc)},
+                status_code=503,
+                headers={"Cache-Control": "no-store"},
+            )
+        except Exception as exc:
+            semaphore.release()
+            err_msg = str(exc).strip() or "The gateway request did not complete."
+            return JSONResponse(
+                {"error": "gateway_unavailable", "message": err_msg},
+                status_code=503,
+                headers={"Cache-Control": "no-store"},
+            )
+
         async def event_stream() -> AsyncIterator[bytes]:
             try:
-                async for delta in service.stream_text(messages):
-                    yield sse_frame("delta", {"text": delta})
+                if has_first_delta:
+                    if first_delta:
+                        yield sse_frame("delta", {"text": first_delta})
+                    async for delta in stream_iter:
+                        yield sse_frame("delta", {"text": delta})
                 yield sse_frame("done", {})
             except Exception as exc:
                 err_msg = str(exc).strip() or "The gateway request did not complete."

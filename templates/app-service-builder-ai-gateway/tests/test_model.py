@@ -160,4 +160,3 @@ def test_gateway_agent_service_initializes_default_openai_client_with_api_key() 
             await service.aclose()
 
     asyncio.run(build_and_close())
-

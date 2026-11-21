@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -240,6 +241,7 @@ class LiveFunctionsMcpIntegrationTests(unittest.TestCase):
                     env=env,
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
+                    start_new_session=(os.name != "nt"),
                 )
                 try:
                     mcp_url = f"http://127.0.0.1:{port}/runtime/webhooks/mcp"
@@ -327,17 +329,40 @@ class LiveFunctionsMcpIntegrationTests(unittest.TestCase):
                     if proc.poll() is None:
                         if os.name == "nt":
                             subprocess.run(
-                                ["taskkill.exe", "/PID", str(proc.pid), "/T", "/F"],
+                                ["taskkill.exe", "/F", "/T", "/PID", str(proc.pid)],
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                                 check=False,
                             )
+                            try:
+                                proc.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                                proc.wait(timeout=5)
                         else:
-                            proc.terminate()
-                        try:
-                            proc.wait(timeout=10)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
+                            try:
+                                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                            except ProcessLookupError:
+                                pass
+                            try:
+                                proc.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                try:
+                                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass
+                                proc.wait(timeout=5)
+
+            close_deadline = time.monotonic() + 5.0
+            port_open = True
+            while time.monotonic() < close_deadline:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as check_sock:
+                    check_sock.settimeout(0.2)
+                    if check_sock.connect_ex(("127.0.0.1", port)) != 0:
+                        port_open = False
+                        break
+                time.sleep(0.1)
+            self.assertFalse(port_open, f"func start child process left port {port} open after cleanup")
 
 
 if __name__ == "__main__":

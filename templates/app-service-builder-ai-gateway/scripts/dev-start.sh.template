@@ -74,16 +74,18 @@ if ((SKIP_SKILL)); then
   echo "Hosted Skills skipped (--skip-skill)."
 elif [ -d "$ROOT/src/skills" ]; then
   skill_dirs=()
+  skill_count=0
   for candidate_dir in "$ROOT"/src/skills/*; do
     if [ -d "$candidate_dir" ] && [ -f "$candidate_dir/host.json" ]; then
       skill_dirs+=("$candidate_dir")
+      skill_count=$((skill_count + 1))
     fi
   done
-  if ((${#skill_dirs[@]} > 0)); then
+  if ((skill_count > 0)); then
     single_skill=0
-    ((${#skill_dirs[@]} == 1)) && single_skill=1
+    ((skill_count == 1)) && single_skill=1
     skill_idx=0
-    for skill_dir in "${skill_dirs[@]}"; do
+    for skill_dir in ${skill_dirs[@]+"${skill_dirs[@]}"}; do
       skill_name="$(basename "$skill_dir")"
       if declare -F skill_port_for_name >/dev/null 2>&1; then
         resolved_skill_port="$(skill_port_for_name "$skill_name" "$skill_idx" "$single_skill")"
@@ -97,7 +99,7 @@ elif [ -d "$ROOT/src/skills" ]; then
         --path "$skill_dir" \
         --port "$resolved_skill_port" \
         --run-dir "$RUN_DIR" \
-        "${clean_arg[@]}"; then
+        ${clean_arg[@]+"${clean_arg[@]}"}; then
         "$ROOT/scripts/dev-stop.sh" || echo "Process cleanup is incomplete." >&2
         exit 1
       fi

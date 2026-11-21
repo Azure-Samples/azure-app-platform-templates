@@ -155,6 +155,96 @@ if curl -sS -o /dev/null "http://127.0.0.1:$agent_port/healthz" 2>/dev/null; the
 fi
 echo "app-service-builder-ai-gateway: unhealthy agent blocks startup"
 
+for name in empty-starter-app app-service-builder-vite app-service-builder-ai-gateway; do
+  app="$test_root/$name-zombie"
+  mkdir -p "$app/scripts" "$app/.dev-run"
+  cp "$root/templates/$name/scripts/dev-stop.sh" "$app/scripts/dev-stop.sh"
+  chmod +x "$app/scripts/dev-stop.sh"
+  python3 -c '
+import os, sys, time
+child_pid = os.fork()
+if child_pid == 0:
+    os._exit(0)
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write(f"{child_pid}\n")
+time.sleep(300)
+' "$app/zombie.pid" &
+  child=$!
+  for _ in {1..40}; do
+    [[ -s "$app/zombie.pid" ]] && break
+    sleep 0.05
+  done
+  zombie_pid="$(cat "$app/zombie.pid")"
+  for _ in {1..40}; do
+    z_state="$(ps -p "$zombie_pid" -o state= 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ "$z_state" == Z* ]] && break
+    sleep 0.05
+  done
+  started_at="$(ps -p "$child" -o lstart= | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  printf 'fixture\t4321\t%s\t%s\n' "$child" "$started_at" >"$app/.dev-run/processes.posix.tsv"
+  "$app/scripts/dev-stop.sh" >"$app/zombie-stop-output" 2>&1
+  wait "$child" 2>/dev/null || true
+  child=""
+  [[ ! -f "$app/.dev-run/processes.posix.tsv" ]]
+  echo "$name: zombie descendant under live parent stopped cleanly"
+done
+
+app="$test_root/mcp-lifecycle-posix"
+mkdir -p "$app/scripts/lifecycle" "$app/bin" "$app/src/skills/text-insights" "$app/.azure-app-platform"
+cp "$root/templates/shared/load-ports.sh" "$app/scripts/load-ports.sh"
+cp "$root/templates/shared/lifecycle/mcp-skill-start.sh" "$app/scripts/lifecycle/mcp-skill-start.sh"
+cp "$root/templates/shared/lifecycle/mcp-skill-stop.sh" "$app/scripts/lifecycle/mcp-skill-stop.sh"
+chmod +x "$app/scripts/lifecycle/mcp-skill-start.sh" "$app/scripts/lifecycle/mcp-skill-stop.sh"
+printf '{"version":"2.0"}\n' >"$app/src/skills/text-insights/host.json"
+printf '{"IsEncrypted":false,"Values":{"FUNCTIONS_WORKER_RUNTIME":"python"}}\n' >"$app/src/skills/text-insights/local.settings.json.example"
+printf '[project]\nname = "mcp-test"\nversion = "0.1.0"\n' >"$app/src/skills/text-insights/pyproject.toml"
+cat >"$app/mcp-server.py" <<'EOF'
+import http.server, json, os, sys
+port = int(sys.argv[1])
+if os.fork() == 0:
+    os._exit(0)
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        msg = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-03-26"}}
+        self.wfile.write(f"event: message\ndata: {json.dumps(msg)}\n\n".encode())
+    def log_message(self, *_args):
+        pass
+http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+EOF
+cat >"$app/bin/func" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat >"$app/bin/uv" <<'EOF'
+#!/usr/bin/env bash
+last=""
+for arg in "$@"; do last="$arg"; done
+exec python3 "$MCP_FIXTURE_SERVER" "$last"
+EOF
+chmod +x "$app/bin/func" "$app/bin/uv"
+mcp_port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+printf 'SKILL_TEXT_INSIGHTS_PORT=%s\n' "$mcp_port" >"$app/.azure-app-platform/ports.env"
+(
+  set -euo pipefail
+  . "$app/scripts/load-ports.sh"
+  load_app_ports "$app"
+  resolved="$(skill_port_for_name text-insights 0 1)"
+  [[ "$resolved" == "$mcp_port" ]]
+  PATH="$app/bin:$PATH" MCP_FIXTURE_SERVER="$app/mcp-server.py" \
+    "$app/scripts/lifecycle/mcp-skill-start.sh" \
+    --name text-insights \
+    --path "$app/src/skills/text-insights" \
+    --port "$resolved" \
+    --run-dir "$app/.dev-run"
+  [[ -f "$app/src/skills/text-insights/local.settings.json" ]]
+  "$app/scripts/lifecycle/mcp-skill-stop.sh" --run-dir "$app/.dev-run"
+  [[ ! -f "$app/.dev-run/processes.posix.tsv" ]]
+)
+echo "mcp-skill-start/stop: SSE MCP readiness, zombie child cleanup, and SKILL_<NAME>_PORT override passed"
+
 for name in dealership-e2e shared/dealer; do
   app="$test_root/${name//\//-}-skill-order"
   mkdir -p "$app/scripts" "$app/bin"

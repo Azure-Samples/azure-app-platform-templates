@@ -123,7 +123,7 @@ else
     --path "$skill_dir" \
     --port "$SKILL_PORT" \
     --run-dir "$RUN_DIR" \
-    "${clean_arg[@]}"; then
+    ${clean_arg[@]+"${clean_arg[@]}"}; then
     "$ROOT/scripts/dev-stop.sh" || echo "Process cleanup is incomplete." >&2
     exit 1
   fi

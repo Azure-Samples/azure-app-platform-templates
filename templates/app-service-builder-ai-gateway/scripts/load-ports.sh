@@ -30,15 +30,17 @@ load_app_ports() {
 }
 
 skill_port_env_name() {
-  local raw="$1" normalized
-  normalized="$(printf '%s' "$raw" | tr '[:lower:]' '[:upper:]' | sed -E 's/[^A-Z0-9]+/_/g; s/^_+//; s/_+$//')"
+  local raw="$1" normalized=""
+  normalized="$(printf '%s' "$raw" | tr '[:lower:]' '[:upper:]' | sed -E -e 's/[^A-Z0-9]+/_/g' -e 's/^_+//' -e 's/_+$//')"
   printf 'SKILL_%s_PORT' "$normalized"
 }
 
 skill_port_for_name() {
-  local skill_name="$1" index="${2:-0}" single_skill="${3:-1}" env_name candidate
+  local skill_name="$1" index="${2:-0}" single_skill="${3:-1}" env_name="" candidate=""
   env_name="$(skill_port_env_name "$skill_name")"
-  candidate="${!env_name:-}"
+  if [[ "$env_name" =~ ^SKILL_[A-Z0-9_]+_PORT$ ]]; then
+    eval "candidate=\"\${${env_name}:-}\""
+  fi
   if [[ -z "$candidate" && "$single_skill" == "1" && "$index" == "0" ]]; then
     candidate="${SKILL_PORT:-}"
   fi

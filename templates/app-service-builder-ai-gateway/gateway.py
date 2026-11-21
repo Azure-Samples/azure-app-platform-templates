@@ -230,4 +230,3 @@ class GatewayAgentService:
                 text = getattr(update, "text", "") or ""
                 if text:
                     yield text
-

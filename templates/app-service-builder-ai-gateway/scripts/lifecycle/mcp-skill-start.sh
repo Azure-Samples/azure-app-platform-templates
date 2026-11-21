@@ -68,7 +68,7 @@ for candidate_bin in \
   "$HOME/.local/bin" \
   "$HOME/.azure-functions"; do
   if [[ -n "$candidate_bin" && -d "$candidate_bin" && ":$PATH:" != *":$candidate_bin:"* ]]; then
-    export PATH="$candidate_bin:$PATH"
+    export PATH="$PATH:$candidate_bin"
   fi
 done
 
@@ -115,7 +115,7 @@ MCP_INIT_PAYLOAD='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"proto
 MCP_URL="http://127.0.0.1:$SKILL_PORT/runtime/webhooks/mcp"
 
 mcp_response_valid() {
-  local raw="$1" line payload
+  local raw="$1" line="" payload=""
   if [[ "$raw" == *"\"jsonrpc\""* && "$raw" == *"\"result\""* && "$raw" == *"\"protocolVersion\""* ]]; then
     return 0
   fi
@@ -143,9 +143,9 @@ for attempt in 1 2; do
     cd "$SKILL_PATH"
     unset VIRTUAL_ENV
     if [[ -f "$SKILL_PATH/pyproject.toml" ]]; then
-      exec uv run func start --port "$SKILL_PORT" --no-build
+      exec uv run func start --port "$SKILL_PORT"
     else
-      exec uv run --with-requirements requirements.txt func start --port "$SKILL_PORT" --no-build
+      exec uv run --with-requirements requirements.txt func start --port "$SKILL_PORT"
     fi
   ) >"$stdout_log" 2>"$stderr_log" &
   skill_pid=$!

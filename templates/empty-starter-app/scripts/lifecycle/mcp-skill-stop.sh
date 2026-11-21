@@ -61,7 +61,9 @@ is_protected_pid() {
 }
 
 process_matches() {
-  local current
+  local current="" state=""
+  state="$("$PS_COMMAND" -p "$1" -o state= 2>/dev/null | tr -d '[:space:]')" || return 1
+  [[ -n "$state" && "$state" != Z* ]] || return 1
   current="$(process_started_at "$1")"
   [[ -n "$current" && "$current" == "$2" ]]
 }
