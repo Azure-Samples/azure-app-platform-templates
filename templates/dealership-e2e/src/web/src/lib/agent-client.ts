@@ -23,7 +23,7 @@ interface AgentResponsePayload {
 
 /**
  * Distinguishes *why* a live-agent call didn't produce a reply, so the UI can
- * show ground truth instead of a single generic "mock fallback" state:
+ * surface accurate diagnostics:
  * - "unreachable": nothing is listening on the agent port at all (process not
  *   started, wrong port/URL, crashed).
  * - "timeout": the agent is reachable, but the turn exceeded the configured
@@ -53,7 +53,7 @@ export class AgentClientError extends Error {
   }
 }
 
-function agentBaseUrl(): string {
+export function getAgentBaseUrl(): string {
   return (process.env.AGENT_URL ?? DEFAULT_AGENT_URL).replace(/\/+$/, "");
 }
 
@@ -96,9 +96,10 @@ export async function fetchAgentReply(
     content: message.content
   }));
 
+  const baseUrl = getAgentBaseUrl();
   let response: Response;
   try {
-    response = await fetch(`${agentBaseUrl()}/responses`, {
+    response = await fetch(`${baseUrl}/responses`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input, stream: false }),
@@ -109,10 +110,10 @@ export async function fetchAgentReply(
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new AgentClientError(
         "timeout",
-        `Agent at ${agentBaseUrl()} did not respond within ${timeoutMs}ms.`
+        `Agent at ${baseUrl} did not respond within ${timeoutMs}ms.`
       );
     }
-    throw new AgentClientError("unreachable", `Could not reach agent at ${agentBaseUrl()}: ${reason}`);
+    throw new AgentClientError("unreachable", `Could not reach agent at ${baseUrl}: ${reason}`);
   }
 
   if (!response.ok) {

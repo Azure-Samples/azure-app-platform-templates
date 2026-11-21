@@ -166,14 +166,16 @@ ACA Sandbox Group), the `aca` CLI, and an AI Gateway with a model deployment.
 
 When you run the starter on your machine (`agentRuntime: "local"` in
 `config/runtime.json`), the agent loop runs locally for fast iteration while
-dispatching tool execution to ACA Sandboxes and routing model calls through AI
+dispatching tool execution to ACA Sandboxes (`ACA_SANDBOX_GROUP` with the `aca`
+CLI or `DOCUMENT_TOOL_SESSION_POOL_ENDPOINT`) and routing model calls through AI
 Gateway.
 
-Without an ACA Sandbox Group, the development fallback uses a minimal-environment
-child process with a Python audit hook that denies socket and DNS operations.
-That is a process-local policy, not an OS or microVM isolation boundary, and is
-for synthetic inputs only. Configuring `ACA_SANDBOX_GROUP` without the `aca` CLI
-fails explicitly rather than silently downgrading to the fallback.
+There is no local subprocess simulation: if neither `ACA_SANDBOX_GROUP` nor
+`DOCUMENT_TOOL_SESSION_POOL_ENDPOINT` is configured, `GET /health` reports
+`documentToolRuntime: "unconfigured"` (`sandboxConfigured: false`), and
+`POST /test-document` or document-bearing `POST /invoke` returns HTTP 503
+(`sandbox-not-configured`). Configuring `ACA_SANDBOX_GROUP` without the `aca`
+CLI fails startup explicitly.
 
 The starter exposes two endpoints so you can test the boundary directly:
 - `POST /test-document` runs the sandbox tool and policy checks on a document without calling a model.

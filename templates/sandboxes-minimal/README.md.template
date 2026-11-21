@@ -22,7 +22,7 @@ and its [implementation walkthrough](docs/demos/loan-application/HOW-IT-WORKS.md
 The generated app also includes a
 [portable fictional loan document](examples/loan-application.txt).
 
-## What is real, and what is simulated
+## Runtime modes (zero simulation)
 
 The default `agentRuntime` is `local`:
 
@@ -32,12 +32,16 @@ The default `agentRuntime` is `local`:
   validation runs in a fresh ACA Sandbox microVM. The harness creates it with
   default-deny egress and Full inspection, applies the reviewed policy, runs
   the tool, reads probe audit evidence when needed, and deletes the sandbox.
-- Without an ACA group, `POST /invoke` executes the tool in a fresh **local
-  child process** from `src/tools/document-validation/`. A minimal allowlisted
-  environment excludes the host's credential variables, and a Python audit
-  hook denies outbound socket/DNS operations. This is **not OS isolation**.
-- If an ACA group is configured but `aca` is missing, startup fails instead of
-  silently falling back to local processing.
+- Alternatively, set `DOCUMENT_TOOL_SESSION_POOL_ENDPOINT` to dispatch document
+  validation to a dedicated ACA custom-container session pool while keeping the
+  agent process local.
+- Without a configured real ACA Sandbox (`ACA_SANDBOX_GROUP` or
+  `DOCUMENT_TOOL_SESSION_POOL_ENDPOINT`), `GET /health` reports
+  `documentToolRuntime: "unconfigured"` (`sandboxConfigured: false`), and
+  `POST /test-document` or document-bearing `POST /invoke` returns HTTP 503
+  (`sandbox-not-configured`). There is no local subprocess simulation.
+- If `ACA_SANDBOX_GROUP` is configured but `aca` is missing, startup fails
+  explicitly.
 - Approved sanitized output is sent to the configured AI Gateway. There is no
   fake or echo response. Missing gateway configuration returns HTTP 503.
 
@@ -123,7 +127,8 @@ Successful responses contain:
   "toolResult": {},
   "runtime": {
     "agentRuntime": "local",
-    "documentToolRuntime": "local-process-simulation",
+    "documentToolRuntime": "aca-custom-container-session",
+    "sandboxConfigured": true,
     "rawDocumentSentToAgent": false
   }
 }
@@ -445,9 +450,11 @@ a Foundry hosted agent or an Azure Functions app.
 
 ## Tests
 
-The tests do not call Azure or a model. They use the real local document child
-process and mocked ACA transports. If your network requires a Python package
-index, configure `UV_INDEX_URL` and `UV_DEFAULT_INDEX` before running `uv`.
+The unit tests do not call Azure or a live model. They test the document tool
+directly and exercise `AgentHarness` against mocked ACA CLI and session-pool
+transports (including explicit HTTP 503 `sandbox-not-configured` checks when no
+ACA Sandbox is configured). If your network requires a Python package index,
+configure `UV_INDEX_URL` and `UV_DEFAULT_INDEX` before running `uv`.
 
 ### macOS/Linux
 
@@ -467,11 +474,11 @@ uv run pytest -q
 Pop-Location
 ```
 
-Tests exercise the local socket-denial policy and mock the ACA CLI lifecycle,
-policy application, and delayed audit decisions. They do not prove cloud
-isolation. Exercise `/health`, `/test-document`, and `/invoke` against the
-configured ACA Sandbox Group, or deploy both images to distinct pools for the
-optional custom-container mode, before making cloud claims.
+Unit tests mock the ACA CLI lifecycle, policy application, and delayed audit
+decisions. They do not prove cloud isolation. Exercise `/health`,
+`/test-document`, and `/invoke` against the configured ACA Sandbox Group, or
+deploy both images to distinct pools for the optional custom-container mode,
+before making cloud claims.
 
 Only newly generated apps use the `src/tools/document-validation/` layout.
 Existing generated apps keep their prior paths until they are deliberately

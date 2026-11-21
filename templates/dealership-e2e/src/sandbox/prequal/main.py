@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from typing import Any
 
 try:
-    from .lender_stub import synthetic_soft_pull
+    from .synthetic_credit_fixtures import synthetic_soft_pull
 except ImportError:
-    from lender_stub import synthetic_soft_pull
+    from synthetic_credit_fixtures import synthetic_soft_pull
 
 TERM_MONTHS = 60
 

@@ -39,8 +39,8 @@ The **loan agent harness** is the code around the loan agent's model calls. It
 accepts HTTP requests, calls the document validation tool, independently checks
 the tool result and final model output, and returns the answer. The Python class
 is `AgentHarness`. In default local mode, the harness and loan agent share the
-same local Python process; the validation tool is a separate local child
-process, which is not an isolation boundary.
+same local Python process while document validation runs in a configured ACA
+Sandbox (`ACA_SANDBOX_GROUP` microVM or `DOCUMENT_TOOL_SESSION_POOL_ENDPOINT`).
 
 ## Physical folders and edit points
 
@@ -83,7 +83,7 @@ means the software executing the loan agent, not the selected language model.
 | --- | --- | --- |
 | **loan agent harness** | Plain Python local HTTP service | The same local Python HTTP service |
 | **loan agent** | Direct Gateway HTTP model client in `src/agent/`; no SDK loop | Python GitHub Copilot SDK plus the bundled Copilot runtime in one ACA custom-container sandbox |
-| **document validation tool** | Plain Python child process; JSON request on stdin and JSON result on stdout | The same Python tool with a standard-library HTTP server in a different ACA custom-container sandbox |
+| **document validation tool** | Ephemeral ACA Sandbox microVM (`ACA_SANDBOX_GROUP` + `aca` CLI) or ACA custom-container session pool (`DOCUMENT_TOOL_SESSION_POOL_ENDPOINT`) | The same Python tool with a standard-library HTTP server in a dedicated ACA custom-container sandbox |
 | **model** | Remote model reached through AI Gateway | Remote model reached through AI Gateway |
 
 Thus, the default loan agent is a thin Python model-calling service, not a
@@ -102,12 +102,13 @@ applies the reviewed policy, and deletes it after execution. Host credentials
 are not inherited; authenticated outbound integrations use proxy Transform
 rules with secret or managed-identity references outside the microVM.
 
-Without an ACA group, local child processes provide **no OS isolation**:
-their Python audit hook denies socket/DNS operations but is not a security
-boundary for arbitrary native code. Use synthetic documents. Egress probes
-inspect the live environment and attempt a bounded HEAD request, returning
-observations rather than a fixed credential-count claim. ACA denial requires
-matching platform audit evidence; DNS/TLS/HTTP failures alone are unverified.
+Without a configured real ACA Sandbox (`ACA_SANDBOX_GROUP` or
+`DOCUMENT_TOOL_SESSION_POOL_ENDPOINT`), document validation fails closed with
+HTTP 503 (`sandbox-not-configured`) instead of running a local subprocess
+simulation. Egress probes inspect the live sandbox environment and attempt a
+bounded HEAD request, returning observations rather than a fixed
+credential-count claim. ACA denial requires matching platform audit evidence;
+DNS/TLS/HTTP failures alone are unverified.
 
 SDK mode requires two separately provisioned ACA session pools,
 images, identity, network policy, and configuration. Selecting the mode does not

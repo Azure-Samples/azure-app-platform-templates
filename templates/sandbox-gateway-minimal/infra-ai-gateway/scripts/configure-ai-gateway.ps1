@@ -269,7 +269,7 @@ try {
             $env:PATH = ($extraAcaPaths -join [System.IO.Path]::PathSeparator) + [System.IO.Path]::PathSeparator + $env:PATH
         }
         if (-not (Get-Command aca -ErrorAction SilentlyContinue)) {
-            Write-Error "ACA CLI ('aca') is not installed. Install ACA CLI in Prerequisites or choose Local simulation mode."
+            Write-Error "ACA CLI ('aca') is not installed. Install ACA CLI in Prerequisites or configure DOCUMENT_TOOL_SESSION_POOL_ENDPOINT before running sandboxed document validation."
             exit 1
         }
         Write-Host "Validating ACA Sandbox Group '$acaSandboxGroup' (create and delete permissions)..."

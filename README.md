@@ -58,32 +58,29 @@ Every template follows three architectural guarantees:
 
 ## Standalone Quickstart (Without Canvas)
 
-Try the Dealership buyer web experience right away in offline mock mode (no Azure resources required):
-
-```shell
-cd templates/dealership-e2e/src/web
-npm install
-npm run dev
-```
-
-Open `http://localhost:3000` and try:
-
-```text
-Find me an EV under $40,000 with at least 250 miles of range
-```
-
-To run the full local live stack (Azurite + all 4 Azure Functions MCP Hosted Skills + `deal-finder` agent + Next.js web app) against Azure AI Gateway, follow [`templates/dealership-e2e/TESTING.md`](templates/dealership-e2e/TESTING.md) and [`templates/dealership-e2e/src/README.md`](templates/dealership-e2e/src/README.md):
-
-- **macOS / Linux**:
-  ```bash
-  cd templates/dealership-e2e
-  ./scripts/dev-start.sh
-  ```
-- **Windows PowerShell 7**:
-  ```powershell
-  cd templates\dealership-e2e
-  .\scripts\dev-start.ps1
-  ```
+1. Provision or connect an Azure AI Gateway for the Dealership sample so `templates/dealership-e2e/src/agent/.env` is configured (see [`templates/dealership-e2e/TESTING.md`](templates/dealership-e2e/TESTING.md) and [`templates/dealership-e2e/src/README.md`](templates/dealership-e2e/src/README.md)):
+   ```shell
+   cd templates/dealership-e2e/infra-ai-gateway
+   azd env new app-platform-aigateway
+   azd provision
+   cd ..
+   ```
+2. Start the full local live stack (Azurite + all 4 Azure Functions MCP Hosted Skills + `deal-finder` agent + Next.js web app):
+   - **macOS / Linux**:
+     ```bash
+     cd templates/dealership-e2e
+     ./scripts/dev-start.sh
+     ```
+   - **Windows PowerShell 7**:
+     ```powershell
+     cd templates\dealership-e2e
+     .\scripts\dev-start.ps1
+     ```
+3. Open `http://localhost:3000` and try:
+   ```text
+   Find me an EV under $40,000 with at least 250 miles of range
+   ```
+   (Starting `src/web` alone without the live `deal-finder` agent surfaces an explicit `agent_error` banner with startup guidance rather than simulated replies; loan application submission remains visibly disabled until a submission workflow is connected.)
 
 ---
 
