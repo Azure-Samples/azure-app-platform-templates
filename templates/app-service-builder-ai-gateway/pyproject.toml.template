@@ -12,6 +12,7 @@ dependencies = [
   "mcp>=1.29.0",
   "openai>=2.54.0",
   "python-dotenv>=1.0.1",
+  "tenacity>=8.2.0",
   "uvicorn>=0.30.0",
 ]
 

@@ -245,6 +245,60 @@ printf 'SKILL_TEXT_INSIGHTS_PORT=%s\n' "$mcp_port" >"$app/.azure-app-platform/po
 )
 echo "mcp-skill-start/stop: SSE MCP readiness, zombie child cleanup, and SKILL_<NAME>_PORT override passed"
 
+app="$test_root/mcp-respawn-supervisor"
+mkdir -p "$app/.dev-run"
+python3 -c '
+import os, signal, subprocess, sys, time
+
+pid_log = sys.argv[1]
+shutting_down = False
+worker = None
+
+def spawn_worker():
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        start_new_session=True,
+    )
+    with open(pid_log, "a", encoding="utf-8") as handle:
+        handle.write(f"{proc.pid}\n")
+    return proc
+
+def on_term(_signum, _frame):
+    global shutting_down
+    shutting_down = True
+    time.sleep(0.15)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, on_term)
+worker = spawn_worker()
+while not shutting_down:
+    if worker.poll() is not None and not shutting_down:
+        worker = spawn_worker()
+    time.sleep(0.02)
+' "$app/workers.pids" &
+child=$!
+for _ in {1..40}; do
+  [[ -s "$app/workers.pids" ]] && break
+  sleep 0.05
+done
+started_at="$(ps -p "$child" -o lstart= | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+printf 'text-insights\t7071\t%s\t%s\n' "$child" "$started_at" >"$app/.dev-run/processes.posix.tsv"
+"$root/templates/shared/lifecycle/mcp-skill-stop.sh" --run-dir "$app/.dev-run"
+wait "$child" 2>/dev/null || true
+child=""
+[[ ! -f "$app/.dev-run/processes.posix.tsv" ]]
+worker_count="$(wc -l <"$app/workers.pids" | tr -d '[:space:]')"
+[[ "$worker_count" == "1" ]]
+while read -r wpid; do
+  [[ -n "$wpid" ]] || continue
+  if kill -0 "$wpid" 2>/dev/null; then
+    kill -9 "$wpid" 2>/dev/null || true
+    echo "Worker PID $wpid survived mcp-skill-stop.sh" >&2
+    exit 1
+  fi
+done <"$app/workers.pids"
+echo "mcp-skill-stop: supervisor-first shutdown prevents worker respawn and orphans"
+
 for name in dealership-e2e shared/dealer; do
   app="$test_root/${name//\//-}-skill-order"
   mkdir -p "$app/scripts" "$app/bin"

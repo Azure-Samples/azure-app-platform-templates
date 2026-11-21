@@ -68,33 +68,91 @@ process_matches() {
   [[ -n "$current" && "$current" == "$2" ]]
 }
 
-kill_tree() {
-  local pid="$1" expected_start="$2" child child_start
-  process_matches "$pid" "$expected_start" || return 0
+collect_descendants() {
+  local parent="$1" child="" child_start="" children=""
+  children="$("$PGREP_COMMAND" -P "$parent" 2>/dev/null || true)"
   while read -r child; do
     [[ "$child" =~ ^[0-9]+$ ]] || continue
+    case "$TREE_SEEN_PIDS" in
+      *" $child "*) continue ;;
+    esac
     if is_protected_pid "$child"; then
       echo "Refusing to stop protected descendant PID $child." >&2
       return 1
     fi
     child_start="$(process_started_at "$child")"
     [[ -n "$child_start" ]] || continue
-    kill_tree "$child" "$child_start" || return 1
-  done < <("$PGREP_COMMAND" -P "$pid" 2>/dev/null || true)
+    TREE_SEEN_PIDS="${TREE_SEEN_PIDS}${child} "
+    TREE_ENTRIES="${TREE_ENTRIES}${child}"$'\t'"${child_start}"$'\n'
+    collect_descendants "$child" || return 1
+  done <<<"$children"
+  return 0
+}
 
+any_tree_alive() {
+  local entry_pid="" entry_start=""
+  while IFS=$'\t' read -r entry_pid entry_start; do
+    [[ -n "$entry_pid" ]] || continue
+    if process_matches "$entry_pid" "$entry_start"; then
+      return 0
+    fi
+  done <<<"$TREE_ENTRIES"
+  return 1
+}
+
+kill_tree() {
+  local pid="$1" expected_start="$2" entry_pid="" entry_start=""
   process_matches "$pid" "$expected_start" || return 0
-  "$KILL_COMMAND" "$pid" 2>/dev/null || true
-  for _ in {1..20}; do
-    process_matches "$pid" "$expected_start" || return 0
+
+  TREE_SEEN_PIDS=" $pid "
+  TREE_ENTRIES="${pid}"$'\t'"${expected_start}"$'\n'
+  collect_descendants "$pid" || return 1
+
+  # Signal supervisor first, then snapshot any newly spawned children before signaling descendants.
+  "$KILL_COMMAND" -TERM "$pid" 2>/dev/null || true
+  collect_descendants "$pid" || return 1
+
+  while IFS=$'\t' read -r entry_pid entry_start; do
+    [[ -n "$entry_pid" && "$entry_pid" != "$pid" ]] || continue
+    if process_matches "$entry_pid" "$entry_start"; then
+      "$KILL_COMMAND" -TERM "$entry_pid" 2>/dev/null || true
+      collect_descendants "$entry_pid" || return 1
+    fi
+  done <<<"$TREE_ENTRIES"
+
+  # Signal any late descendants discovered during the pass above.
+  while IFS=$'\t' read -r entry_pid entry_start; do
+    [[ -n "$entry_pid" && "$entry_pid" != "$pid" ]] || continue
+    if process_matches "$entry_pid" "$entry_start"; then
+      "$KILL_COMMAND" -TERM "$entry_pid" 2>/dev/null || true
+    fi
+  done <<<"$TREE_ENTRIES"
+
+  for _ in {1..25}; do
+    any_tree_alive || return 0
     "$SLEEP_COMMAND" 0.1
   done
-  process_matches "$pid" "$expected_start" || return 0
-  "$KILL_COMMAND" -9 "$pid" 2>/dev/null || true
+
+  while IFS=$'\t' read -r entry_pid entry_start; do
+    [[ -n "$entry_pid" ]] || continue
+    if process_matches "$entry_pid" "$entry_start"; then
+      collect_descendants "$entry_pid" || return 1
+      "$KILL_COMMAND" -KILL "$entry_pid" 2>/dev/null || true
+    fi
+  done <<<"$TREE_ENTRIES"
+
+  while IFS=$'\t' read -r entry_pid entry_start; do
+    [[ -n "$entry_pid" ]] || continue
+    if process_matches "$entry_pid" "$entry_start"; then
+      "$KILL_COMMAND" -KILL "$entry_pid" 2>/dev/null || true
+    fi
+  done <<<"$TREE_ENTRIES"
+
   for _ in {1..10}; do
-    process_matches "$pid" "$expected_start" || return 0
+    any_tree_alive || return 0
     "$SLEEP_COMMAND" 0.1
   done
-  ! process_matches "$pid" "$expected_start"
+  ! any_tree_alive
 }
 
 trap 'rm -f "$NEXT_STATE"' EXIT

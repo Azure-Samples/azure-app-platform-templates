@@ -163,9 +163,9 @@ class AnalyzeTextUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("analyze_text", tools_by_name)
         raw = await tools_by_name["analyze_text"].invoke(
             arguments={"text": "# Title\nReady?"},
-            skip_parsing=True,
         )
-        parsed = json.loads(raw)
+        raw_text = raw if isinstance(raw, str) else getattr(raw[0], "text", str(raw))
+        parsed = json.loads(raw_text)
         self.assertEqual(parsed["markdownHeadings"], 1)
         self.assertEqual(parsed["questions"], 1)
 
