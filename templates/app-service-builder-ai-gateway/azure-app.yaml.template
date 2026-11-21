@@ -2,10 +2,19 @@ name: __APP_SLUG__
 purpose: "__PURPOSE_JSON__"
 capabilities:
   web:
+    kind: web
     path: .
     interface: http://localhost:8080
     links:
       - gateway
+      - skills
   gateway:
+    kind: gateway
     path: infra-ai-gateway/README.md
     links: []
+  skills:
+    kind: mcp-skill
+    path: src/skills/text-insights
+    interface: http://localhost:7071/runtime/webhooks/mcp
+    links:
+      - web

@@ -243,10 +243,11 @@
       "id": "builtin-app-service-builder-ai-gateway-v1",
       "kind": "empty",
       "name": "App Service Builder - Agent & AI Gateway",
-      "description": "Python FastAPI + Microsoft Agent Framework chat app on App Service Builder, connected to AI Gateway.",
+      "description": "Python FastAPI + Microsoft Agent Framework chat app on App Service Builder, connected to AI Gateway and a deterministic MCP Hosted Skill.",
       "capabilityIds": [
         "web",
-        "gateway"
+        "gateway",
+        "skills"
       ],
       "customization": [
         "App purpose",
@@ -264,16 +265,27 @@
           {
             "name": "web",
             "port": 8080
+          },
+          {
+            "name": "text-insights",
+            "port": 7071,
+            "kind": "mcp-skill"
           }
         ],
         "startEntrypoints": [
           {
             "name": "web",
             "port": 8080
+          },
+          {
+            "name": "text-insights",
+            "port": 7071,
+            "kind": "mcp-skill"
           }
         ],
         "reservedPorts": [
-          8080
+          8080,
+          7071
         ]
       },
       "requiredPaths": [
@@ -298,10 +310,20 @@
         "scripts/dev-stop.ps1",
         "scripts/load-ports.sh",
         "scripts/load-ports.ps1",
+        "scripts/lifecycle/mcp-skill-start.sh",
+        "scripts/lifecycle/mcp-skill-stop.sh",
+        "scripts/lifecycle/mcp-skill-start.ps1",
+        "scripts/lifecycle/mcp-skill-stop.ps1",
+        "src/skills/text-insights/function_app.py",
+        "src/skills/text-insights/agents/skill.agent.md",
+        "src/skills/text-insights/tools/analyze_text.py",
+        "src/skills/text-insights/azure.yaml",
+        "src/skills/text-insights/infra/main.bicep",
+        "src/skills/text-insights/tests/test_mcp_skill.py",
         "infra-ai-gateway/README.md"
       ],
       "constraints": {
-        "hostedSkillCount": 0,
+        "hostedSkillCount": 1,
         "inventDomainTools": false,
         "editableDomainConfiguration": true,
         "wholeAppScriptsRequired": true,
@@ -443,15 +465,11 @@
       ],
       "readyToRun": true,
       "startup": {
-        "start": "./scripts/dev-start.sh --skip-skill",
+        "start": "./scripts/dev-start.sh",
         "fullStart": "./scripts/dev-start.sh",
         "stop": "./scripts/dev-stop.sh",
-        "startArgs": [
-          "--skip-skill"
-        ],
-        "startPowerShellArgs": [
-          "-SkipSkill"
-        ],
+        "startArgs": [],
+        "startPowerShellArgs": [],
         "requiresGatewayForFullStart": false,
         "entrypoints": [
           {
@@ -465,7 +483,7 @@
           {
             "name": "skill",
             "port": 7071,
-            "kind": "function"
+            "kind": "mcp-skill"
           }
         ],
         "startEntrypoints": [
@@ -476,6 +494,11 @@
           {
             "name": "agent",
             "port": 8088
+          },
+          {
+            "name": "skill",
+            "port": 7071,
+            "kind": "mcp-skill"
           }
         ],
         "reservedPorts": [
@@ -492,12 +515,25 @@
         "scripts/dev-stop.sh",
         "scripts/dev-start.ps1",
         "scripts/dev-stop.ps1",
+        "scripts/load-ports.sh",
+        "scripts/load-ports.ps1",
+        "scripts/lifecycle/mcp-skill-start.sh",
+        "scripts/lifecycle/mcp-skill-stop.sh",
+        "scripts/lifecycle/mcp-skill-start.ps1",
+        "scripts/lifecycle/mcp-skill-stop.ps1",
         "src/web",
         "src/agent/agent.yaml",
+        "src/agent/main.py",
         "src/agent/pyproject.toml",
         "src/agent/prompts/system.md",
+        "src/agent/tests/test_agent_mcp.py",
         "src/skills/<hosted-skill>",
-        "src/skills/<hosted-skill>/tests/test_contract.py"
+        "src/skills/<hosted-skill>/function_app.py",
+        "src/skills/<hosted-skill>/agents/skill.agent.md",
+        "src/skills/<hosted-skill>/tools/analyze_text.py",
+        "src/skills/<hosted-skill>/azure.yaml",
+        "src/skills/<hosted-skill>/infra/main.bicep",
+        "src/skills/<hosted-skill>/tests/test_mcp_skill.py"
       ],
       "constraints": {
         "hostedSkillCount": 1,
@@ -514,9 +550,9 @@
       "name": "Hosted skill",
       "tierId": "skills",
       "projectPath": "src/skills/{name}",
-      "description": "An HTTP-triggered Azure Function starter. Define its bounded operation before connecting it to your agent.",
+      "description": "A deterministic Streamable HTTP MCP Hosted Skill on Azure Functions (`azurefunctions-agents-runtime`) with component-scoped Flex Consumption Bicep.",
       "entry": "function_app.py",
-      "sourcePath": "templates/empty-starter-app/src/skills/__SKILL__",
+      "sourcePath": "templates/build-blocks/mcp-skill",
       "baseSourcePath": null,
       "tokens": [
         "__BLOCK_NAME__",

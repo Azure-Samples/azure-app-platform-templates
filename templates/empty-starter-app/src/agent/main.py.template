@@ -1,40 +1,571 @@
+"""Local agent routing real MCP Hosted Skill tool calls and Azure AI Gateway synthesis."""
+
+from __future__ import annotations
+
+import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import re
+import threading
+from typing import Any, Mapping
+from urllib import error, parse, request
 
 ROOT = Path(__file__).resolve().parents[2]
-DOMAIN = json.loads((ROOT / "config" / "domain.json").read_text())
+DOMAIN_PATH = ROOT / "config" / "domain.json"
+SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "system.md"
+RAW_SKILL_TOKEN = "__SKILL_NAME__"
+DEFAULT_SKILL_NAME = "text-insights"
+DEFAULT_GATEWAY_MODEL = "gpt-5-mini"
 
 
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path != "/health":
-            self.send_error(404)
+def _resolve_skill_name() -> str:
+    if RAW_SKILL_TOKEN and not RAW_SKILL_TOKEN.startswith("__"):
+        return RAW_SKILL_TOKEN
+    skills_dir = ROOT / "src" / "skills"
+    if skills_dir.is_dir():
+        for child in sorted(skills_dir.iterdir()):
+            if child.is_dir() and not child.name.startswith("__"):
+                return child.name
+    return DEFAULT_SKILL_NAME
+
+
+def _skill_port_env_name(skill_name: str) -> str:
+    normalized = re.sub(r"[^A-Z0-9]+", "_", skill_name.upper()).strip("_")
+    return f"SKILL_{normalized}_PORT"
+
+
+def _read_dotenv_files(app_root: Path) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for candidate in (
+        app_root / ".azure-app-platform" / "ports.env",
+        app_root / ".env",
+        app_root / "src" / "agent" / ".env",
+    ):
+        if not candidate.is_file():
+            continue
+        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip()
+            val = val.strip().strip("\"'")
+            if key and val:
+                merged[key] = val
+    return merged
+
+
+def _effective_env(app_root: Path = ROOT, overrides: Mapping[str, str] | None = None) -> dict[str, str]:
+    env = _read_dotenv_files(app_root)
+    for key, val in os.environ.items():
+        if val is not None and val.strip():
+            env[key] = val.strip()
+    if overrides:
+        for key, val in overrides.items():
+            if val is not None:
+                if val.strip():
+                    env[key] = val.strip()
+                else:
+                    env.pop(key, None)
+    return env
+
+
+def resolve_mcp_skill_url(skill_name: str, env: Mapping[str, str]) -> str:
+    explicit = env.get("MCP_SKILL_URL", "").strip()
+    if explicit:
+        return explicit
+    port_key = _skill_port_env_name(skill_name)
+    raw_port = env.get(port_key, "").strip() or env.get("SKILL_PORT", "").strip() or "7071"
+    port = int(raw_port)
+    if port < 1024 or port > 65535:
+        raise ValueError(f"MCP skill port must be between 1024 and 65535 (got {port}).")
+    return f"http://127.0.0.1:{port}/runtime/webhooks/mcp"
+
+
+def resolve_gateway_config(env: Mapping[str, str]) -> dict[str, str] | None:
+    base_url = (
+        env.get("AI_GATEWAY_BASE_URL", "").strip()
+        or env.get("AZURE_AI_GATEWAY_ENDPOINT", "").strip()
+    )
+    if not base_url:
+        raw_host = env.get("AZURE_AI_GATEWAY_HOST", "").strip()
+        if raw_host:
+            base_url = f"https://{raw_host}/default/models/openai/v1"
+    api_key = (
+        env.get("AI_GATEWAY_API_KEY", "").strip()
+        or env.get("AZURE_AI_GATEWAY_API_KEY", "").strip()
+    )
+    bearer_token = env.get("AI_GATEWAY_BEARER_TOKEN", "").strip()
+    if not base_url or (not api_key and not bearer_token):
+        return None
+    normalized_base = base_url.rstrip("/")
+    if not normalized_base.endswith("/openai/v1"):
+        normalized_base = f"{normalized_base}/default/models/openai/v1"
+    model = (
+        env.get("AI_GATEWAY_MODEL", "").strip()
+        or env.get("AZURE_AI_GATEWAY_MODEL", "").strip()
+        or env.get("OPENAI_MODEL", "").strip()
+        or DEFAULT_GATEWAY_MODEL
+    )
+    return {
+        "chatCompletionsUrl": f"{normalized_base}/chat/completions",
+        "model": model,
+        "apiKey": api_key,
+        "bearerToken": bearer_token,
+    }
+
+
+class McpSkillUnavailableError(RuntimeError):
+    """Raised when the local or remote MCP Hosted Skill cannot be reached."""
+
+
+class McpToolInputError(ValueError):
+    """Raised when deterministic MCP tool validation rejects caller input."""
+
+
+class GatewayUnavailableError(RuntimeError):
+    """Raised when Azure AI Gateway is unconfigured or fails."""
+
+
+class PersistentMcpClient:
+    """Thread-safe Streamable HTTP MCP client reusing a single initialized session."""
+
+    def __init__(self, mcp_url: str, *, timeout: float = 10.0) -> None:
+        self.mcp_url = mcp_url
+        self.timeout = timeout
+        self._parsed = parse.urlparse(mcp_url)
+        self._lock = threading.Lock()
+        self._conn: http.client.HTTPConnection | None = None
+        self._session_id: str | None = None
+        self._initialized = False
+        self._tools: list[dict[str, Any]] = []
+        self._next_id = 0
+        self.initialize_count = 0
+
+    def _open_connection(self) -> http.client.HTTPConnection:
+        if self._conn is not None:
+            return self._conn
+        host = self._parsed.hostname or "127.0.0.1"
+        port = self._parsed.port
+        if self._parsed.scheme == "https":
+            self._conn = http.client.HTTPSConnection(host, port or 443, timeout=self.timeout)
+        else:
+            self._conn = http.client.HTTPConnection(host, port or 80, timeout=self.timeout)
+        return self._conn
+
+    def _reset_connection(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+        self._conn = None
+        self._session_id = None
+        self._initialized = False
+
+    def close(self) -> None:
+        with self._lock:
+            self._reset_connection()
+
+    def _post_jsonrpc_locked(self, payload: dict[str, Any], *, expect_result: bool = True) -> dict[str, Any]:
+        path = self._parsed.path or "/runtime/webhooks/mcp"
+        if self._parsed.query:
+            path = f"{path}?{self._parsed.query}"
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "Connection": "keep-alive",
+        }
+        if self._session_id:
+            headers["Mcp-Session-Id"] = self._session_id
+        body = json.dumps(payload).encode("utf-8")
+
+        conn = self._open_connection()
+        conn.request("POST", path, body=body, headers=headers)
+        resp = conn.getresponse()
+        sid = resp.getheader("Mcp-Session-Id") or resp.getheader("mcp-session-id")
+        if sid:
+            self._session_id = sid
+        status = resp.status
+        content_type = (resp.getheader("Content-Type") or "").lower()
+
+        if status not in (200, 202):
+            raw_err = resp.read().decode("utf-8", errors="replace")
+            raise McpSkillUnavailableError(
+                f"MCP endpoint {self.mcp_url} returned HTTP {status}: {raw_err[:200]}"
+            )
+
+        if not expect_result or status == 202:
+            resp.read()
+            return {}
+
+        if "text/event-stream" in content_type:
+            data_lines: list[str] = []
+            parsed_msg: dict[str, Any] = {}
+            while True:
+                raw_line = resp.readline()
+                if not raw_line:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if line.startswith("data:"):
+                    data_lines.append(line[5:].lstrip())
+                elif line == "" and data_lines:
+                    joined = "\n".join(data_lines).strip()
+                    data_lines.clear()
+                    if joined:
+                        candidate = json.loads(joined)
+                        if isinstance(candidate, dict) and ("result" in candidate or "error" in candidate):
+                            parsed_msg = candidate
+                            break
+            # Streaming SSE responses stay open; close socket cleanly and keep session_id for reuse
+            try:
+                resp.close()
+            except Exception:
+                pass
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+            return parsed_msg
+
+        raw_bytes = resp.read()
+        raw_text = raw_bytes.decode("utf-8").strip()
+        return json.loads(raw_text) if raw_text else {}
+
+    def _ensure_initialized_locked(self) -> None:
+        if self._initialized:
             return
-        body = json.dumps({"status": "ok", "app": DOMAIN["name"]}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._next_id += 1
+        init_msg = self._post_jsonrpc_locked(
+            {
+                "jsonrpc": "2.0",
+                "id": self._next_id,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "empty-starter-agent", "version": "0.1.0"},
+                },
+            }
+        )
+        if "result" not in init_msg:
+            raise McpSkillUnavailableError(f"Invalid MCP initialize response from {self.mcp_url}.")
+        self._post_jsonrpc_locked(
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            expect_result=False,
+        )
+        self._next_id += 1
+        tools_msg = self._post_jsonrpc_locked(
+            {"jsonrpc": "2.0", "id": self._next_id, "method": "tools/list", "params": {}}
+        )
+        tools_list = tools_msg.get("result", {}).get("tools", [])
+        if not isinstance(tools_list, list) or not tools_list:
+            raise McpSkillUnavailableError(f"MCP skill at {self.mcp_url} exposed no tools.")
+        self._tools = tools_list
+        self._initialized = True
+        self.initialize_count += 1
 
-    def do_POST(self):
-        if self.path != "/responses":
-            self.send_error(404)
+    def list_tools(self) -> list[dict[str, Any]]:
+        with self._lock:
+            try:
+                self._ensure_initialized_locked()
+                return list(self._tools)
+            except McpSkillUnavailableError:
+                self._reset_connection()
+                raise
+            except Exception as exc:
+                self._reset_connection()
+                raise McpSkillUnavailableError(
+                    f"MCP Hosted Skill is unreachable at {self.mcp_url}: {exc}"
+                ) from exc
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._ensure_initialized_locked()
+                    self._next_id += 1
+                    response = self._post_jsonrpc_locked(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": self._next_id,
+                            "method": "tools/call",
+                            "params": {"name": name, "arguments": arguments},
+                        }
+                    )
+                    if "error" in response:
+                        err = response["error"]
+                        msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                        raise McpToolInputError(msg)
+                    result = response.get("result", {})
+                    content = result.get("content", [])
+                    text_value = ""
+                    if isinstance(content, list) and content:
+                        first = content[0]
+                        if isinstance(first, dict):
+                            text_value = str(first.get("text", ""))
+                    if result.get("isError"):
+                        raise McpToolInputError(text_value or f"MCP tool '{name}' reported an error.")
+                    return json.loads(text_value) if text_value else {}
+                except McpToolInputError:
+                    raise
+                except Exception as exc:
+                    self._reset_connection()
+                    if attempt == 1:
+                        raise McpSkillUnavailableError(
+                            f"MCP Hosted Skill is unavailable at {self.mcp_url}: {exc}"
+                        ) from exc
+            raise McpSkillUnavailableError(f"MCP Hosted Skill is unavailable at {self.mcp_url}.")
+
+
+class StarterAgentRuntime:
+    def __init__(
+        self,
+        *,
+        app_root: Path = ROOT,
+        env_overrides: Mapping[str, str] | None = None,
+    ) -> None:
+        self.app_root = app_root
+        self._env_overrides = dict(env_overrides) if env_overrides is not None else None
+        domain_file = app_root / "config" / "domain.json"
+        self.domain = (
+            json.loads(domain_file.read_text(encoding="utf-8"))
+            if domain_file.is_file()
+            else {"name": "starter-app", "purpose": ""}
+        )
+        prompt_file = app_root / "src" / "agent" / "prompts" / "system.md"
+        if not prompt_file.is_file() and SYSTEM_PROMPT_PATH.is_file():
+            prompt_file = SYSTEM_PROMPT_PATH
+        self.system_prompt = (
+            prompt_file.read_text(encoding="utf-8").strip()
+            if prompt_file.is_file()
+            else "Ground every answer in deterministic MCP tool outputs."
+        )
+        self.skill_name = _resolve_skill_name()
+        env = _effective_env(self.app_root, self._env_overrides)
+        self.mcp_skill_url = resolve_mcp_skill_url(self.skill_name, env)
+        self.mcp_client = PersistentMcpClient(self.mcp_skill_url)
+
+    def close(self) -> None:
+        self.mcp_client.close()
+
+    def current_gateway_config(self) -> dict[str, str] | None:
+        env = _effective_env(self.app_root, self._env_overrides)
+        return resolve_gateway_config(env)
+
+    def health_payload(self) -> dict[str, Any]:
+        gateway = self.current_gateway_config()
+        return {
+            "status": "ok",
+            "app": self.domain.get("name", "starter-app"),
+            "skill": self.skill_name,
+            "mcpSkillConfigured": bool(self.mcp_skill_url),
+            "mcpSkillUrl": self.mcp_skill_url,
+            "gatewayConfigured": gateway is not None,
+            "model": gateway["model"] if gateway else None,
+        }
+
+    def run_analyze_text_action(self, text: str) -> dict[str, Any]:
+        if not isinstance(text, str) or not text.strip():
+            raise McpToolInputError("text must be a non-empty string.")
+        return self.mcp_client.call_tool("analyze_text", {"text": text})
+
+    def synthesize_with_gateway(
+        self,
+        *,
+        gateway: dict[str, str],
+        user_message: str,
+        metrics: dict[str, Any],
+    ) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if gateway["apiKey"]:
+            headers["api-key"] = gateway["apiKey"]
+        elif gateway["bearerToken"]:
+            headers["Authorization"] = f"Bearer {gateway['bearerToken']}"
+
+        payload = {
+            "model": gateway["model"],
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Deterministic MCP tool `analyze_text` result:\n"
+                        f"{json.dumps(metrics, sort_keys=True)}\n\n"
+                        f"User message:\n{user_message}"
+                    ),
+                },
+            ],
+        }
+        req = request.Request(
+            gateway["chatCompletionsUrl"],
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=30.0) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:200]
+            raise GatewayUnavailableError(
+                f"Azure AI Gateway returned HTTP {exc.code}: {detail}"
+            ) from exc
+        except Exception as exc:
+            raise GatewayUnavailableError(
+                f"Azure AI Gateway request failed: {exc}"
+            ) from exc
+
+        choices = body.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            raise GatewayUnavailableError("Azure AI Gateway returned no completion choices.")
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise GatewayUnavailableError("Azure AI Gateway returned empty completion content.")
+        return content.strip()
+
+    def handle_response_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_message = payload.get("message") or payload.get("prompt") or ""
+        if not isinstance(raw_message, str) or not raw_message.strip():
+            raise McpToolInputError("Request JSON must include a non-empty 'message'.")
+        user_message = raw_message.strip()
+
+        gateway = self.current_gateway_config()
+        if gateway is None:
+            raise GatewayUnavailableError(
+                "Azure AI Gateway is not configured. Set AI_GATEWAY_BASE_URL (or AZURE_AI_GATEWAY_ENDPOINT) "
+                "and AI_GATEWAY_API_KEY (or AZURE_AI_GATEWAY_API_KEY)."
+            )
+
+        target_text = payload.get("document") if isinstance(payload.get("document"), str) and payload["document"].strip() else user_message
+        metrics = self.run_analyze_text_action(target_text)
+        reply = self.synthesize_with_gateway(
+            gateway=gateway,
+            user_message=user_message,
+            metrics=metrics,
+        )
+        return {
+            "message": reply,
+            "input": user_message,
+            "tool": "analyze_text",
+            "toolResult": metrics,
+        }
+
+
+def create_server(
+    host: str = "127.0.0.1",
+    port: int = 8088,
+    *,
+    runtime: StarterAgentRuntime | None = None,
+) -> ThreadingHTTPServer:
+    active_runtime = runtime or StarterAgentRuntime()
+
+    class Handler(BaseHTTPRequestHandler):
+        def _write_json(self, status_code: int, payload: dict[str, Any]) -> None:
+            encoded = json.dumps(payload).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _read_json(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length) if length > 0 else b"{}"
+            parsed = json.loads(raw.decode("utf-8"))
+            if not isinstance(parsed, dict):
+                raise ValueError("JSON body must be an object.")
+            return parsed
+
+        def do_GET(self) -> None:
+            if self.path not in ("/health", "/healthz"):
+                self._write_json(404, {"error": {"code": "not_found", "message": "Route not found."}})
+                return
+            self._write_json(200, active_runtime.health_payload())
+
+        def do_POST(self) -> None:
+            if self.path in ("/api/tools/analyze_text", "/tools/analyze_text"):
+                try:
+                    body = self._read_json()
+                    text = body.get("text") if "text" in body else body.get("message", "")
+                    metrics = active_runtime.run_analyze_text_action(text)
+                    self._write_json(200, {"status": "ok", "tool": "analyze_text", "metrics": metrics})
+                except (json.JSONDecodeError, UnicodeDecodeError, ValueError, McpToolInputError) as exc:
+                    self._write_json(400, {"error": {"code": "invalid_input", "message": str(exc)}})
+                except McpSkillUnavailableError as exc:
+                    self._write_json(503, {"error": {"code": "mcp_skill_unavailable", "message": str(exc)}})
+                return
+
+            if self.path not in ("/responses", "/invoke"):
+                self._write_json(404, {"error": {"code": "not_found", "message": "Route not found."}})
+                return
+
+            try:
+                body = self._read_json()
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+                self._write_json(400, {"error": {"code": "invalid_json", "message": str(exc)}})
+                return
+
+            if body.get("action") == "analyze_text":
+                try:
+                    text = body.get("text") if "text" in body else body.get("message", "")
+                    metrics = active_runtime.run_analyze_text_action(text)
+                    self._write_json(200, {"status": "ok", "tool": "analyze_text", "toolResult": metrics})
+                except McpToolInputError as exc:
+                    self._write_json(400, {"error": {"code": "invalid_input", "message": str(exc)}})
+                except McpSkillUnavailableError as exc:
+                    self._write_json(503, {"error": {"code": "mcp_skill_unavailable", "message": str(exc)}})
+                return
+
+            try:
+                gateway_Check = active_runtime.current_gateway_config()
+                if gateway_Check is None:
+                    self._write_json(
+                        503,
+                        {
+                            "error": {
+                                "code": "gateway_not_configured",
+                                "message": (
+                                    "Azure AI Gateway is not configured. Set AI_GATEWAY_BASE_URL "
+                                    "(or AZURE_AI_GATEWAY_ENDPOINT) and AI_GATEWAY_API_KEY."
+                                ),
+                            }
+                        },
+                    )
+                    return
+                result = active_runtime.handle_response_turn(body)
+                self._write_json(200, result)
+            except McpToolInputError as exc:
+                self._write_json(400, {"error": {"code": "invalid_input", "message": str(exc)}})
+            except McpSkillUnavailableError as exc:
+                self._write_json(503, {"error": {"code": "mcp_skill_unavailable", "message": str(exc)}})
+            except GatewayUnavailableError as exc:
+                self._write_json(503, {"error": {"code": "gateway_unavailable", "message": str(exc)}})
+
+        def log_message(self, _format: str, *_args: object) -> None:
             return
-        length = int(self.headers.get("Content-Length", "0"))
-        request = json.loads(self.rfile.read(length) or b"{}")
-        body = json.dumps({
-            "message": f"{DOMAIN['name']} is ready for you to define its Hosted Skill.",
-            "input": request.get("message", ""),
-            "toolResult": None,
-        }).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.agent_runtime = active_runtime  # type: ignore[attr-defined]
+    return server
 
 
-ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("AGENT_PORT", "8088"))), Handler).serve_forever()
+def main() -> None:
+    port = int(os.environ.get("AGENT_PORT") or os.environ.get("PORT") or "8088")
+    server = create_server("127.0.0.1", port)
+    try:
+        server.serve_forever()
+    finally:
+        server.agent_runtime.close()  # type: ignore[attr-defined]
+
+
+if __name__ == "__main__":
+    main()

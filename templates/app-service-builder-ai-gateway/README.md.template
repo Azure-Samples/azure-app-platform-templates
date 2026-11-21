@@ -12,11 +12,14 @@ The browser UI uses accessible native controls with Fluent semantic tokens. App 
 
 ```text
 Browser UI (/) ──► FastAPI + Agent Framework (/api/chat/stream) ──► Azure AI Gateway (/openai/v1) ──► Model
+                                    │
+                                    └──► MCP Hosted Skill (`text-insights` at /runtime/webhooks/mcp)
 ```
 
 - `builder.yaml` declares the App Service Builder web service (`port: 8080`, `healthCheckPath: /health`).
-- `app.py` serves the chat UI (`/`) and SSE streaming endpoint (`POST /api/chat/stream`).
-- `config.py` and `gateway.py` configure `OpenAIChatCompletionClient` against Azure AI Gateway using either your local `.env` (`AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`, `AI_GATEWAY_MODEL`) or Azure Managed Identity (`AZURE_AI_GATEWAY_HOST`, `AZURE_CLIENT_ID`).
+- `src/skills/text-insights` runs a deterministic Azure Functions MCP Hosted Skill (`analyze_text` over `/runtime/webhooks/mcp`) with zero inner LLM calls.
+- `app.py` serves the chat UI (`/`), fast deterministic MCP tool execution (`POST /api/tools/analyze_text`), and SSE streaming (`POST /api/chat/stream`), returning `503` if either AI Gateway or the MCP Hosted Skill is unavailable.
+- `config.py` and `gateway.py` wire `OpenAIChatCompletionClient` and a persistent `MCPStreamableHTTPTool` (`text-insights`) into Microsoft Agent Framework.
 
 ## Local Setup & Run
 
