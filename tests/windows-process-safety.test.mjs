@@ -244,6 +244,7 @@ for (const name of ["dealership-e2e", "shared/dealer"]) {
       await cp(path.join(templates, name, "scripts", `${script}.ps1`), path.join(scripts, `${script}.ps1`));
     }
     await link(process.execPath, path.join(bin, "uv.exe"));
+    await writeFile(path.join(bin, "func.cmd"), "@echo off\r\necho 4.0.0\r\n");
     await writeFile(path.join(bin, "azurite.cmd"), "@echo off\r\nexit /b 0\r\n");
     await writeFile(path.join(azurite, "azurite.js"), [
       "const net = require('node:net');",
@@ -336,6 +337,7 @@ test("dealership retries a transient Functions provider failure once", {
       path.join(scripts, `${script}.ps1`));
   }
   await link(process.execPath, path.join(bin, "uv.exe"));
+  await writeFile(path.join(bin, "func.cmd"), "@echo off\r\necho 4.0.0\r\n");
   await writeFile(path.join(bin, "azurite.cmd"), "@echo off\r\nexit /b 0\r\n");
   await writeFile(path.join(azurite, "azurite.js"), [
     "const net = require('node:net');",
@@ -347,6 +349,8 @@ test("dealership retries a transient Functions provider failure once", {
   for (const skill of ["inventory-search", "trade-in-value", "rate-sheet", "deal-doc"]) {
     const directory = path.join(root, "src", "skills", skill);
     await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "pyproject.toml"), "[project]\nname = 'skill-fixture'\nversion = '0.1.0'\n");
+    await writeFile(path.join(directory, "requirements.txt"), "azure-functions\n");
     await writeFile(path.join(directory, "local.settings.json"),
       JSON.stringify({ Values: { AZURE_FUNCTIONS_AGENTS_PROVIDER: "foundry" } }));
     await writeFile(path.join(directory, "run"), [
@@ -357,7 +361,8 @@ test("dealership retries a transient Functions provider failure once", {
       "if (name === 'inventory-search' && (count === 1 || process.env.ALWAYS_FAIL === '1')) {",
       "  console.error(\"Value cannot be null. (Parameter 'provider')\"); process.exit(17);",
       "}",
-      "net.createServer().listen(Number(process.argv.at(-1)), '127.0.0.1');",
+      "const portIndex = process.argv.indexOf('--port');",
+      "net.createServer().listen(Number(process.argv[portIndex + 1]), '127.0.0.1');",
     ].join("\n"));
   }
   const names = [
@@ -406,6 +411,14 @@ test("dealership retries a transient Functions provider failure once", {
   assert.equal(await readFile(path.join(root, "deal-doc.attempts"), "utf8"), "1");
   const tracked = JSON.parse(await readFile(state, "utf8"));
   assert.equal(tracked.filter(entry => entry.name === "inventory-search").length, 1);
+  assert.equal(
+    await readFile(path.join(root, "src", "skills", "inventory-search", "requirements.txt"), "utf8"),
+    "azure-functions\n",
+  );
+  await assert.rejects(
+    readFile(path.join(root, "src", "skills", "inventory-search", ".requirements.azd.bak")),
+    { code: "ENOENT" },
+  );
   const stopped = invoke("dev-stop");
   assert.equal(stopped.status, 0, stopped.stderr);
   await rm(path.join(root, "inventory-search.attempts"));
@@ -414,6 +427,14 @@ test("dealership retries a transient Functions provider failure once", {
   assert.notEqual(failed.status, 0);
   assert.equal(await readFile(path.join(root, "inventory-search.attempts"), "utf8"), "2");
   assert.equal(await readFile(path.join(root, "deal-doc.attempts"), "utf8"), "1");
+  assert.equal(
+    await readFile(path.join(root, "src", "skills", "inventory-search", "requirements.txt"), "utf8"),
+    "azure-functions\n",
+  );
+  await assert.rejects(
+    readFile(path.join(root, "src", "skills", "inventory-search", ".requirements.azd.bak")),
+    { code: "ENOENT" },
+  );
   await assert.rejects(readFile(state), { code: "ENOENT" });
 });
 
